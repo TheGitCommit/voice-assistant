@@ -1,0 +1,55 @@
+# ============================================================================
+# SERVER DEPENDENCIES
+# ============================================================================
+
+# Web Framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# HTTP Client
+httpx>=0.25.0
+
+# Speech Recognition (Whisper)
+faster-whisper>=0.9.0
+
+# ============================================================================
+# CLIENT DEPENDENCIES
+# ============================================================================
+
+# Audio I/O
+sounddevice>=0.4.6
+
+# Voice Activity Detection
+webrtcvad>=2.0.10
+
+# ============================================================================
+# SHARED DEPENDENCIES
+# ============================================================================
+
+# WebSocket Support
+websockets>=12.0
+
+# Numerical Operations
+numpy>=1.24.0
+
+# ============================================================================
+# EXTERNAL DEPENDENCIES
+# ============================================================================
+
+# Server External Tools (install separately):
+# - Llama.cpp: https://github.com/ggerganov/llama.cpp
+# - Piper TTS: https://github.com/rhasspy/piper
+# - CUDA Toolkit: https://developer.nvidia.com/cuda-downloads
+
+# Client System Dependencies (Linux/Raspberry Pi):
+# sudo apt-get install -y portaudio19-dev python3-dev
+
+# ============================================================================
+# DEVELOPMENT/TESTING (optional)
+# ============================================================================
+
+# pytest>=7.4.0
+# pytest-asyncio>=0.21.0
+# black>=23.0.0
+# mypy>=1.5.0
+# ruff>=0.1.0

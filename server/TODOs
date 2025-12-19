@@ -1,0 +1,32 @@
+Future Improvements (Optional)
+High Priority
+
+Configuration from environment: Load paths and parameters from env vars or YAML
+Health monitoring: Periodic checks that Llama is responding, auto-restart on failure
+Metrics: Prometheus metrics for latency, throughput, error rates
+Connection authentication: Add token-based auth for production deployment
+
+Medium Priority
+
+Multiple client support: Session manager to handle concurrent connections with resource limits
+Audio format negotiation: Support multiple sample rates/formats from clients
+STT streaming: Use streaming Whisper API to reduce latency
+LLM streaming: Stream LLM responses for better perceived latency
+Conversation context: Maintain conversation history per connection
+
+Low Priority / Nice to Have
+
+Unit tests: Add pytest suite for core logic (VAD, pipeline)
+Integration tests: Test full WebSocket flow with mock clients
+Performance profiling: Identify bottlenecks in pipeline
+Dynamic VAD tuning: Auto-adjust thresholds based on ambient noise
+Model hot-swapping: Change models without restarting server
+Audio preprocessing: Noise reduction, AGC before VAD
+Graceful degradation: Fallback to CPU if CUDA unavailable
+
+Deployment
+
+Docker containerization: Package with all dependencies
+systemd service: Production deployment as system service
+Log aggregation: Structured JSON logs for centralized logging
+Monitoring dashboard: Real-time visibility into server health

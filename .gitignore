@@ -1,0 +1,159 @@
+# Voice Assistant .gitignore
+
+# ============================================================================
+# Python
+# ============================================================================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ============================================================================
+# IDEs and Editors
+# ============================================================================
+# PyCharm
+.idea/
+*.iml
+.idea_modules/
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# ============================================================================
+# OS
+# ============================================================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+
+# ============================================================================
+# Project Specific
+# ============================================================================
+
+# Configuration (may contain sensitive paths/IPs)
+# Uncomment if you want to keep config private
+# server/config.py
+# client/config.py
+
+# Logs
+*.log
+logs/
+
+# Audio recordings (testing)
+*.wav
+*.mp3
+*.ogg
+recordings/
+
+# Model files (too large for git)
+*.gguf
+*.bin
+*.onnx
+*.onnx.json
+*.pt
+*.pth
+models/
+
+# External tools (install separately)
+llama.cpp/
+piper/
+piper.exe
+llama-server.exe
+server.exe
+
+# Test recordings
+test_audio/
+audio_samples/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Database files (if added later)
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# pytest
+.pytest_cache/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Profiling
+*.prof
+
+# Documentation builds
+docs/_build/
+site/
+
+# ============================================================================
+# Hardware/Raspberry Pi Specific
+# ============================================================================
+# System configs (if backing up)
+# /boot/config.txt
+# /etc/asound.conf
