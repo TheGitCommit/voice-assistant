@@ -1,8 +1,11 @@
-"""
-Configuration for Raspberry Pi voice assistant client.
-"""
-
+import os
 from dataclasses import dataclass
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+env_path = Path(__file__).parent.parent / ".env"
+load_dotenv(env_path)
 
 
 @dataclass(frozen=True)
@@ -54,7 +57,7 @@ class ClientConfig:
 
 DEFAULT_CONFIG = ClientConfig(
     server=ServerConfig(
-        url="ws://server_ip:8000/ws/audio",
+        url=os.getenv("SERVER_URL", "ws://localhost:8000/ws/audio"),
     ),
     capture=AudioCaptureConfig(),
     playback=AudioPlaybackConfig(),

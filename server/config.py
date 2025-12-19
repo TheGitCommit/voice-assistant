@@ -1,10 +1,11 @@
-"""
-Centralized configuration for the voice assistant server.
-All paths, ports, and tunable parameters live here.
-"""
-
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+env_path = Path(__file__).parent.parent / ".env"
+load_dotenv(env_path)
 
 
 @dataclass(frozen=True)
@@ -93,12 +94,12 @@ class LoggingConfig:
 
 CONFIG = {
     "llama": LlamaConfig(
-        exe_path=r"path_to_server.exe",
-        model_path=r"path_to_model",
+        exe_path=os.getenv("LLAMA_EXE_PATH", r"path_to_server.exe"),
+        model_path=os.getenv("LLAMA_MODEL_PATH", r"path_to_model"),
     ),
     "piper": PiperConfig(
-        exe_path=r"/\server\piper\piper.exe",
-        model_path=r"/\server\piper\models\en_US-amy-medium.onnx",
+        exe_path=os.getenv("PIPER_EXE_PATH", r".\server\piper\piper.exe"),
+        model_path=os.getenv("PIPER_MODEL_PATH", r".\server\piper\models\en_US-amy-medium.onnx"),
     ),
     "whisper": WhisperConfig(),
     "vad": VADConfig(),
