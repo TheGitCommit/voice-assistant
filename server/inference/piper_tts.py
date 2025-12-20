@@ -5,6 +5,7 @@ Text-to-Speech using Piper.
 import logging
 import os
 import subprocess
+import time
 from typing import Optional
 
 from server.config import PiperConfig
@@ -55,6 +56,7 @@ class PiperTTS:
             "--output_raw",
         ]
 
+        start_time = time.perf_counter()
         try:
             process = subprocess.Popen(
                 command,
@@ -67,6 +69,7 @@ class PiperTTS:
             audio_bytes, stderr = process.communicate(
                 input=text.encode("utf-8"), timeout=30
             )
+            duration = time.perf_counter() - start_time
 
             if process.returncode != 0:
                 error_msg = stderr.decode("utf-8", errors="replace").strip()
@@ -78,9 +81,10 @@ class PiperTTS:
                 return None
 
             logger.info(
-                "Synthesized %d bytes of audio from %d chars",
+                "Synthesized %d bytes of audio from %d chars latency=%.3fs",
                 len(audio_bytes),
                 len(text),
+                duration,
             )
             return audio_bytes
 

@@ -109,6 +109,8 @@ piper/
 piper.exe
 llama-server.exe
 server.exe
+TODO.md
+PERFORMANCE.md
 
 # Test recordings
 test_audio/

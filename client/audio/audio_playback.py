@@ -14,9 +14,15 @@ logger = logging.getLogger(__name__)
 
 class AudioPlayback:
     """
-    Plays audio to speaker.
+    Handles audio playback functionality, providing methods to start, play, and close audio streams.
 
-    Handles PCM16 audio data from the server.
+    This class utilizes the given audio configuration to initialize an output audio stream.
+    It ensures proper playback by managing audio frames, handling errors, and logging activities.
+    The class can play audio data from provided byte streams, check the stream's active status,
+    and securely close the stream when no longer needed.
+
+    :ivar config: Configuration settings for audio playback, including sample rate, channels, and dtype.
+    :type config: AudioPlaybackConfig
     """
 
     def __init__(self, config: AudioPlaybackConfig):
@@ -69,7 +75,6 @@ class AudioPlayback:
             logger.exception("Error writing to audio stream")
 
     def close(self) -> None:
-        """Stop playback and release resources."""
         logger.info("Closing audio playback")
 
         try:
@@ -81,5 +86,4 @@ class AudioPlayback:
         logger.info("Audio playback closed")
 
     def is_active(self) -> bool:
-        """Check if playback stream is active."""
         return self._stream.active

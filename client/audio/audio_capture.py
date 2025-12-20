@@ -1,7 +1,3 @@
-"""
-Audio capture from microphone using sounddevice.
-"""
-
 import logging
 import queue
 from typing import Optional
@@ -16,16 +12,14 @@ logger = logging.getLogger(__name__)
 
 class AudioCapture:
     """
-    Handles capturing audio data from a microphone and provides functionality
-    to retrieve audio chunks for further processing.
+    Represents an audio capturing utility that uses an input stream to capture
+    audio data according to a specified configuration. This class provides
+    methods for starting and stopping audio capture, reading audio data, and
+    checking if the audio stream is running. It manages a queue to store
+    audio data chunks and handles streaming operations efficiently.
 
-    This class interfaces with the underlying sound device to stream audio
-    data into a queue for asynchronous consumption. It allows for starting,
-    stopping, and checking the running status of audio capture, as well as
-    reading captured audio chunks.
-
-    :ivar config: Configuration for audio capture, such as sample rate, number
-        of channels, chunk size, and data type.
+    :ivar config: Configuration object for audio capture settings, including
+        sample rate, channels, chunk size, and queue maximum size.
     :type config: AudioCaptureConfig
     """
 
@@ -48,11 +42,6 @@ class AudioCapture:
         time_info,
         status: sd.CallbackFlags,
     ) -> None:
-        """
-        Callback invoked by sounddevice when audio is available.
-
-        Runs in a separate thread - must be lightweight and non-blocking.
-        """
         if status:
             logger.warning("Audio capture status: %s", status)
             return
@@ -67,7 +56,6 @@ class AudioCapture:
             logger.debug("Audio queue full, dropping frame")
 
     def start(self) -> None:
-        """Start capturing audio from microphone."""
         if self._stream is not None:
             logger.warning("AudioCapture already started")
             return
@@ -86,22 +74,10 @@ class AudioCapture:
         logger.info("Audio capture started")
 
     def read(self, timeout: Optional[float] = None) -> np.ndarray:
-        """
-        Read next audio chunk from queue.
 
-        Args:
-            timeout: Maximum time to wait for data (None = block forever)
-
-        Returns:
-            Audio chunk as float32 numpy array
-
-        Raises:
-            queue.Empty: If timeout expires with no data
-        """
         return self._queue.get(timeout=timeout)
 
     def stop(self) -> None:
-        """Stop capturing audio and release resources."""
         if self._stream is None:
             return
 
@@ -118,5 +94,4 @@ class AudioCapture:
         logger.info("Audio capture stopped")
 
     def is_running(self) -> bool:
-        """Check if capture is currently running."""
         return self._stream is not None and self._stream.active

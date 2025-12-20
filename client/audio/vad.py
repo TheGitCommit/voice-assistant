@@ -1,7 +1,3 @@
-"""
-Voice Activity Detection using WebRTC VAD.
-"""
-
 import logging
 
 import numpy as np
@@ -14,13 +10,20 @@ logger = logging.getLogger(__name__)
 
 class VoiceActivityDetector:
     """
-    Detects voice activity in audio stream using WebRTC VAD.
+    VoiceActivityDetector class is responsible for detecting voice activity from audio frames.
 
-    Tracks speech state and provides feedback for UI/logging purposes.
-    Note: The actual speech segmentation happens server-side; this is
-    primarily for client-side feedback.
+    This class uses WebRTC Voice Activity Detection (VAD) to determine if a given audio
+    frame contains speech or not. It processes audio signals in small chunks (frames) and maintains
+    a state of whether the current context is within speech or silence. It also provides a reset
+    mechanism to reinitialize state and an additional method to check the current voice activity status.
+
+    :ivar config: The configuration for the VAD behavior, including aggressiveness and silence
+        processing limits.
+    :type config: VADConfig
+    :ivar sample_rate: The sample rate of the audio input in Hz. Supported values are 8000, 16000,
+        32000, and 48000.
+    :type sample_rate: int
     """
-
     def __init__(self, config: VADConfig, sample_rate: int):
         self.config = config
         self.sample_rate = sample_rate
@@ -42,15 +45,6 @@ class VoiceActivityDetector:
         )
 
     def process_frame(self, audio_float32: np.ndarray) -> bool:
-        """
-        Process an audio frame and update speech state.
-
-        Args:
-            audio_float32: Audio chunk as float32 array (range -1.0 to 1.0)
-
-        Returns:
-            True if currently in speech, False otherwise
-        """
         # Convert float32 to int16 for WebRTC VAD
         pcm_int16 = self._float32_to_int16(audio_float32)
 
@@ -77,18 +71,15 @@ class VoiceActivityDetector:
 
     @staticmethod
     def _float32_to_int16(audio: np.ndarray) -> bytes:
-        """Convert float32 audio to int16 PCM bytes."""
         # Clip to valid range and convert to int16
         clipped = np.clip(audio, -1.0, 1.0)
         pcm_int16 = (clipped * 32767).astype(np.int16)
         return pcm_int16.tobytes()
 
     def is_in_speech(self) -> bool:
-        """Check if currently detecting speech."""
         return self._in_speech
 
     def reset(self) -> None:
-        """Reset speech state (useful for reconnection)."""
         logger.debug("VAD state reset")
         self._in_speech = False
         self._silence_frame_count = 0

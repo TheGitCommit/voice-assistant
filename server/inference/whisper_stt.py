@@ -3,6 +3,7 @@ Speech-to-Text using Faster Whisper.
 """
 
 import logging
+import time
 from typing import Any
 
 import numpy as np
@@ -41,6 +42,7 @@ class WhisperSTT:
         Returns:
             Transcribed text (empty string if transcription fails)
         """
+        start_time = time.perf_counter()
         try:
             segments, info = self.model.transcribe(
                 audio,
@@ -49,12 +51,14 @@ class WhisperSTT:
 
             # Consume generator and join segments
             text = " ".join(seg.text for seg in segments).strip()
+            duration = time.perf_counter() - start_time
 
             logger.info(
-                "Transcription complete: text_len=%d language=%s probability=%.2f",
+                "Transcription complete: text_len=%d language=%s probability=%.2f latency=%.3fs",
                 len(text),
                 info.language,
                 info.language_probability,
+                duration,
             )
 
             return text

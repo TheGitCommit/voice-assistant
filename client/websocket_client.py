@@ -1,30 +1,35 @@
-"""
-WebSocket client for voice assistant communication.
-"""
-
 import asyncio
 import json
 import logging
-from typing import Optional
 
 import websockets
 
 from client.config import ClientConfig
-from client.audio_capture import AudioCapture
-from client.audio_playback import AudioPlayback
-from client.vad import VoiceActivityDetector
+from client.audio.audio_capture import AudioCapture
+from client.audio.audio_playback import AudioPlayback
+from client.audio.vad import VoiceActivityDetector
 
 logger = logging.getLogger(__name__)
 
 
 class VoiceAssistantClient:
     """
-    WebSocket client for voice assistant.
+    Represents a voice assistant client capable of handling audio data, communication with a server,
+    and processing received messages for real-time interaction.
 
-    Manages bidirectional audio streaming:
-    - Sends microphone audio to server
-    - Receives and plays TTS audio responses
-    - Handles JSON control messages
+    Provides methods to manage the connection, handle communication, and process audio and data
+    messages between a client application and a server. This class is designed to operate as an
+    asynchronous component, leveraging asyncio for concurrent operations.
+
+    :ivar config: The configuration settings required for the client, including audio and server
+                  settings.
+    :type config: ClientConfig
+    :ivar capture: The audio capture module responsible for recording audio input.
+    :type capture: AudioCapture
+    :ivar playback: The audio playback module responsible for outputting audio.
+    :type playback: AudioPlayback
+    :ivar vad: A voice activity detector used for processing audio and detecting if speech is present.
+    :type vad: VoiceActivityDetector
     """
 
     def __init__(self, config: ClientConfig):
@@ -42,11 +47,6 @@ class VoiceAssistantClient:
         logger.info("VoiceAssistantClient initialized")
 
     async def run(self) -> None:
-        """
-        Main client loop.
-
-        Connects to server and runs send/receive tasks until error or shutdown.
-        """
         logger.info("Connecting to server: %s", self.config.server.url)
 
         try:
@@ -97,7 +97,6 @@ class VoiceAssistantClient:
             await self._cleanup()
 
     async def _send_hello(self) -> None:
-        """Send initial hello message to server."""
         if not self._websocket:
             return
 
@@ -111,11 +110,6 @@ class VoiceAssistantClient:
         logger.info("Sent hello message")
 
     async def _send_loop(self) -> None:
-        """
-        Continuously send microphone audio to server.
-
-        Reads from audio capture queue and sends as binary WebSocket messages.
-        """
         logger.info("Send loop started (microphone active)")
 
         try:
@@ -140,11 +134,6 @@ class VoiceAssistantClient:
             raise
 
     async def _receive_loop(self) -> None:
-        """
-        Continuously receive messages from server.
-
-        Handles both binary audio data and JSON control messages.
-        """
         logger.info("Receive loop started")
 
         try:
@@ -168,12 +157,6 @@ class VoiceAssistantClient:
             raise
 
     def _handle_audio(self, audio_bytes: bytes) -> None:
-        """
-        Handle received audio data.
-
-        Args:
-            audio_bytes: PCM16LE audio from server TTS
-        """
         logger.debug("Received %d bytes of audio", len(audio_bytes))
 
         try:
@@ -182,24 +165,18 @@ class VoiceAssistantClient:
             logger.exception("Error playing audio")
 
     def _handle_json_message(self, message: str) -> None:
-        """
-        Handle received JSON control message.
-
-        Args:
-            message: JSON string from server
-        """
         try:
             data = json.loads(message)
             msg_type = data.get("type")
 
             if msg_type == "transcription":
                 text = data.get("text", "")
-                print(f"📝 You: {text}")
+                print(f"You: {text}")
                 logger.info("Transcription: %s", text)
 
             elif msg_type == "llm_response":
                 text = data.get("text", "")
-                print(f"🤖 Assistant: {text}")
+                print(f"Assistant: {text}")
                 logger.info("LLM response received")
 
             else:
@@ -211,7 +188,6 @@ class VoiceAssistantClient:
             logger.exception("Error handling JSON message")
 
     async def _cleanup(self) -> None:
-        """Clean up resources."""
         logger.info("Cleaning up client resources")
 
         self._running = False
@@ -235,6 +211,5 @@ class VoiceAssistantClient:
         logger.info("Client cleanup complete")
 
     def stop(self) -> None:
-        """Request client shutdown (call from outside async context)."""
         logger.info("Stop requested")
         self._running = False

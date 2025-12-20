@@ -87,10 +87,22 @@ async def audio_stream_endpoint(websocket: WebSocket):
         # Wait for cancellation to complete
         await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Log final statistics
+        # Log final statistics including performance metrics
         stats = connection.get_stats()
+        perf_stats = processor.timing_stats.get_all_stats()
+        
         logger.info(
             "[%s] Connection closed: stats=%s",
             connection.connection_id,
             stats,
         )
+        
+        if perf_stats:
+            logger.info(
+                "[%s] Performance summary: %s",
+                connection.connection_id,
+                perf_stats,
+            )
+        
+        # Cleanup LLM client
+        await processor.llm.close()

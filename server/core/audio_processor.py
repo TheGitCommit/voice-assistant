@@ -4,6 +4,7 @@ Audio processing pipeline: VAD -> STT -> LLM -> TTS.
 
 import asyncio
 import logging
+import time
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -14,6 +15,7 @@ from server.inference.whisper_stt import WhisperSTT
 from server.inference.piper_tts import PiperTTS
 from server.inference.llm_client import LLMClient
 from server.utils.logging_utils import RateLimitedLogger
+from server.utils.timing import TimingStats
 
 if TYPE_CHECKING:
     from server.networking.websocket_connection import WebSocketConnection
@@ -49,6 +51,9 @@ class AudioProcessor:
         self._rl_logger = RateLimitedLogger(
             logger, CONFIG["logging"].rate_limit_seconds
         )
+
+        # Performance timing statistics
+        self.timing_stats = TimingStats()
 
         self._chunk_count = 0
 
@@ -116,28 +121,34 @@ class AudioProcessor:
         Args:
             utterance: Complete audio utterance as PCM bytes
         """
+        pipeline_start = time.perf_counter()
         try:
             conn_id = self.connection.connection_id
 
             # Convert bytes to numpy array for STT
             pcm = np.frombuffer(utterance, dtype=np.float32)
-            duration = len(pcm) / CONFIG["audio"].sample_rate
+            audio_duration = len(pcm) / CONFIG["audio"].sample_rate
 
             logger.info(
                 "[%s] Processing utterance: duration=%.2fs samples=%d",
                 conn_id,
-                duration,
+                audio_duration,
                 len(pcm),
             )
 
             # Speech-to-Text
+            stt_start = time.perf_counter()
             transcript = self.stt.transcribe(pcm)
+            stt_latency = time.perf_counter() - stt_start
+            self.timing_stats.record("stt", stt_latency)
 
             if not transcript:
                 logger.warning("[%s] Empty transcription, skipping pipeline", conn_id)
                 return
 
-            logger.info("[%s] Transcription: %s", conn_id, transcript)
+            logger.info(
+                "[%s] Transcription: %s (STT: %.3fs)", conn_id, transcript, stt_latency
+            )
 
             # Send transcription to client
             await self.connection.send_event(
@@ -148,13 +159,18 @@ class AudioProcessor:
             )
 
             # LLM inference
+            llm_start = time.perf_counter()
             response = await self.llm.get_completion(transcript)
+            llm_latency = time.perf_counter() - llm_start
+            self.timing_stats.record("llm", llm_latency)
 
             if not response:
                 logger.warning("[%s] Empty LLM response", conn_id)
                 return
 
-            logger.info("[%s] LLM response: %s", conn_id, response[:100])
+            logger.info(
+                "[%s] LLM response: %s (LLM: %.3fs)", conn_id, response[:100], llm_latency
+            )
 
             # Send LLM response to client
             await self.connection.send_event(
@@ -165,10 +181,25 @@ class AudioProcessor:
             )
 
             # Text-to-Speech
+            tts_start = time.perf_counter()
             audio_bytes = self.tts.synthesize(response)
+            tts_latency = time.perf_counter() - tts_start
+            self.timing_stats.record("tts", tts_latency)
 
             if audio_bytes:
                 await self.connection.send_audio(audio_bytes)
+                # End-to-end latency (from utterance detection to audio sent)
+                e2e_latency = time.perf_counter() - pipeline_start
+                self.timing_stats.record("end_to_end", e2e_latency)
+
+                logger.info(
+                    "[%s] Pipeline complete: E2E=%.3fs (STT=%.3fs LLM=%.3fs TTS=%.3fs)",
+                    conn_id,
+                    e2e_latency,
+                    stt_latency,
+                    llm_latency,
+                    tts_latency,
+                )
             else:
                 logger.warning("[%s] TTS synthesis failed or empty", conn_id)
 

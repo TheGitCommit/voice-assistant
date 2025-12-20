@@ -99,6 +99,21 @@ async def health_check():
     }
 
 
+@app.get("/metrics")
+async def metrics():
+    """
+    Performance metrics endpoint.
+    
+    Returns aggregate performance statistics (if available).
+    Note: Currently returns placeholder structure. In a production system,
+    this would aggregate metrics from all active connections.
+    """
+    return {
+        "note": "Metrics endpoint - performance stats are logged per connection",
+        "llama_running": llama_manager.is_running(),
+    }
+
+
 def main():
     """Run the application."""
     ws_config = CONFIG["websocket"]
