@@ -1,6 +1,6 @@
 # Voice Assistant
 
-Local-first voice assistant with real-time streaming. All inference runs on your hardware—no cloud required.
+Local-first voice assistant with real-time streaming.
 
 ## Architecture
 
@@ -32,7 +32,7 @@ Local-first voice assistant with real-time streaming. All inference runs on your
 
 ## Features
 
-- **Streaming pipeline**: LLM tokens → sentence detection → TTS → audio playback (low latency)
+- **Streaming pipeline**: LLM tokens → sentence detection → TTS → audio playback 
 - **Barge-in support**: Interrupt responses mid-playback by speaking
 - **Audio feedback**: Audible cues for listening/processing states
 - **Conversation persistence**: Sessions saved to disk, restored on reconnect
@@ -278,27 +278,6 @@ voice-assistant/
 └── readme.md
 ```
 
-## Performance
-
-Typical latencies on RTX 3080 + Ryzen 5800X:
-
-| Component | Time |
-|-----------|------|
-| VAD | ~5ms |
-| STT (small.en) | 300-500ms |
-| LLM (8B Q4) | 800-1500ms |
-| TTS | 50-100ms |
-| **End-to-end** | **1.5-2.5s** |
-
-See [PERFORMANCE.md](PERFORMANCE.md) for measurement details.
-
-### Optimization Tips
-
-1. **Use smaller models** for faster response
-2. **Increase `gpu_layers`** to offload more to GPU
-3. **Lower `beam_size`** in Whisper config (trades accuracy for speed)
-4. **Tune VAD thresholds** to reduce false triggers
-
 ### TTS Prefetching
 
 The pipeline synthesizes the next sentence while the current one is playing:
@@ -361,16 +340,3 @@ Only retries on connection/timeout errors, not on bad requests.
 - Check microphone permissions
 - Install PortAudio: `sudo apt install portaudio19-dev`
 - List devices: `python -c "import sounddevice; print(sounddevice.query_devices())"`
-
-### High latency
-- Use smaller Whisper model
-- Use quantized LLM (Q4_K_M recommended)
-- Ensure GPU is being used (`device: cuda` in config)
-
-### VAD cuts off speech
-- Lower `speech_threshold` (more sensitive)
-- Increase `silence_frames_required` (longer pause needed)
-
-## License
-
-MIT
