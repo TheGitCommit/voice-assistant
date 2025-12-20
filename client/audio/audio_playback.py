@@ -1,8 +1,6 @@
-"""
-Audio playback to speaker using sounddevice.
-"""
-
 import logging
+import threading
+from collections import deque
 
 import numpy as np
 import sounddevice as sd
@@ -13,17 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class AudioPlayback:
-    """
-    Handles audio playback functionality, providing methods to start, play, and close audio streams.
-
-    This class utilizes the given audio configuration to initialize an output audio stream.
-    It ensures proper playback by managing audio frames, handling errors, and logging activities.
-    The class can play audio data from provided byte streams, check the stream's active status,
-    and securely close the stream when no longer needed.
-
-    :ivar config: Configuration settings for audio playback, including sample rate, channels, and dtype.
-    :type config: AudioPlaybackConfig
-    """
+    """Plays PCM audio to speakers via sounddevice."""
 
     def __init__(self, config: AudioPlaybackConfig):
         self.config = config
@@ -32,6 +20,8 @@ class AudioPlayback:
             channels=config.channels,
             dtype=config.dtype,
         )
+        self._playing = False
+        self._lock = threading.Lock()
 
         logger.info(
             "AudioPlayback initialized: rate=%d channels=%d",
@@ -39,40 +29,47 @@ class AudioPlayback:
             config.channels,
         )
 
+    @property
+    def is_playing(self) -> bool:
+        with self._lock:
+            return self._playing
+
     def start(self) -> None:
-        """Start the output stream."""
         logger.info("Starting audio playback")
         self._stream.start()
         logger.info("Audio playback started")
 
     def play(self, audio_bytes: bytes) -> None:
-        """
-        Plays audio from the provided byte stream. The method ensures the given audio data is
-        16-bit sample aligned. It converts the input audio bytes to PCM frames and writes them
-        to the designated audio stream. Logs the frame count before playing audio.
-
-        :param audio_bytes: A bytes object containing audio data aligned to 16-bit samples.
-        :type audio_bytes: bytes
-        :return: None
-        :rtype: None
-        :raises ValueError: If the audio data length is not aligned to 16-bit samples.
-        :raises Exception: If there is an error writing to the audio stream.
-        """
-        # Validate alignment
         if len(audio_bytes) % 2 != 0:
             raise ValueError(
-                f"Audio data must be aligned to 16-bit samples, got {len(audio_bytes)} bytes"
+                f"Audio data must be 16-bit aligned, got {len(audio_bytes)} bytes"
             )
 
-        # Convert bytes to numpy array
         pcm_frames = np.frombuffer(audio_bytes, dtype=np.int16)
 
         logger.debug("Playing %d audio frames", len(pcm_frames))
+
+        with self._lock:
+            self._playing = True
 
         try:
             self._stream.write(pcm_frames)
         except Exception:
             logger.exception("Error writing to audio stream")
+        finally:
+            with self._lock:
+                self._playing = False
+
+    def stop_playback(self) -> None:
+        """Stop current playback and clear buffer."""
+        with self._lock:
+            self._playing = False
+        try:
+            self._stream.stop()
+            self._stream.start()
+            logger.info("Playback stopped and buffer cleared")
+        except Exception:
+            logger.exception("Error stopping playback")
 
     def close(self) -> None:
         logger.info("Closing audio playback")

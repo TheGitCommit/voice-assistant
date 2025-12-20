@@ -1,12 +1,3 @@
-"""
-Voice Assistant Server - Main Entry Point
-
-Coordinates startup/shutdown of:
-- Llama.cpp inference server
-- FastAPI WebSocket server
-- Audio processing pipeline
-"""
-
 import asyncio
 import logging
 import sys
@@ -16,7 +7,6 @@ from pathlib import Path
 import uvicorn
 from fastapi import FastAPI
 
-# Add project root to path for imports
 PROJECT_ROOT = Path(__file__).parent.parent.absolute()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -26,35 +16,21 @@ from server.utils.logging_utils import setup_logging
 from server.inference.llama_process_manager import LlamaProcessManager
 from server.networking.websocket_server import router as ws_router
 
-# Initialize logging
 setup_logging(CONFIG["logging"].level)
 logger = logging.getLogger(__name__)
 
-# Initialize Llama manager
 llama_manager = LlamaProcessManager(CONFIG["llama"])
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Asynchronous context manager handling the lifespan of a FastAPI application.
-
-    This function manages the startup and shutdown lifecycle of the Voice Assistant
-    Server using an external Llama inference server. It ensures the server is started
-    and ready before connections are allowed and handles clean shutdown processes.
-
-    :param app: The FastAPI application for which lifespan is being managed.
-    :type app: FastAPI
-    :return: Yields control back to allow application server lifecycle management.
-    :rtype: AsyncGenerator[None, None]
-    """
+    """Manage Llama server lifecycle."""
     logger.info("=== Starting Voice Assistant Server ===")
 
-    # Start Llama inference server
+    monitor_task = None
+
     try:
         llama_manager.start()
-
-        # Wait for Llama to load model and be ready
         logger.info(
             "Waiting %.1fs for Llama model to load...",
             CONFIG["llama"].startup_delay_seconds,
@@ -66,6 +42,11 @@ async def lifespan(app: FastAPI):
 
         logger.info("Llama server ready")
 
+        # Start health monitor in background
+        monitor_task = asyncio.create_task(
+            llama_manager.monitor_loop(check_interval=30.0)
+        )
+
     except Exception:
         logger.exception("Failed to start Llama server")
         raise
@@ -74,40 +55,35 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown
     logger.info("=== Shutting down Voice Assistant Server ===")
+
+    if monitor_task:
+        monitor_task.cancel()
+        try:
+            await monitor_task
+        except asyncio.CancelledError:
+            pass
+
     llama_manager.stop()
     logger.info("Shutdown complete")
 
 
-# Create FastAPI application
-app = FastAPI(
-    title="Voice Assistant Server",
-    lifespan=lifespan,
-)
-
-# Register WebSocket router
+app = FastAPI(title="Voice Assistant Server", lifespan=lifespan)
 app.include_router(ws_router)
 
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
+    llama_healthy = await llama_manager.health_check()
     return {
-        "status": "healthy",
+        "status": "healthy" if llama_healthy else "degraded",
         "llama_running": llama_manager.is_running(),
+        "llama_healthy": llama_healthy,
     }
 
 
 @app.get("/metrics")
 async def metrics():
-    """
-    Performance metrics endpoint.
-    
-    Returns aggregate performance statistics (if available).
-    Note: Currently returns placeholder structure. In a production system,
-    this would aggregate metrics from all active connections.
-    """
     return {
         "note": "Metrics endpoint - performance stats are logged per connection",
         "llama_running": llama_manager.is_running(),
@@ -115,7 +91,6 @@ async def metrics():
 
 
 def main():
-    """Run the application."""
     ws_config = CONFIG["websocket"]
 
     logger.info(
@@ -128,7 +103,7 @@ def main():
         app,
         host=ws_config.host,
         port=ws_config.port,
-        log_config=None,  # Use our logging config
+        log_config=None,
     )
 
 

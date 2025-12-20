@@ -9,21 +9,6 @@ logger = logging.getLogger(__name__)
 
 
 class DeepgramTTS:
-    """
-    Provides a class for interfacing with Deepgram Text-to-Speech (TTS) API.
-
-    DeepgramTTS enables the synthesis of speech from text using the Deepgram API. This
-    class facilitates asynchronous communication with the API, sending the necessary text
-    input and retrieving synthesized audio in the configured format. The class ensures that
-    required configuration values such as the API key and model parameters are properly set.
-    Errors related to API interaction, such as timeouts or invalid responses, are handled
-    and logged appropriately.
-
-    :ivar config: The configuration object containing Deepgram API details including API key,
-        TTS model, encoding, and sample rate.
-    :type config: DeepgramConfig
-    """
-
     def __init__(self, config: DeepgramConfig):
         self.config = config
 

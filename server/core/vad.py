@@ -1,153 +1,123 @@
-"""
-Energy-based Voice Activity Detection (VAD).
-"""
-
 import logging
 from enum import Enum
 from typing import Optional
-
 import numpy as np
-
+import torch
+from silero_vad import load_silero_vad
 from server.config import VADConfig, AudioConfig
 
 logger = logging.getLogger(__name__)
 
 
 class VADState(Enum):
-    """
-    Represents the various states of a Voice Activity Detection (VAD) system.
-
-    The VADState Enum captures the state transitions in a typical VAD system,
-    including the idle state when no speech is detected, the active speech state,
-    and the silence phase that follows detected speech.
-
-    """
-
-    IDLE = "idle"  # No speech detected, buffer empty or contains only noise
-    SPEECH = "speech"  # Currently receiving speech
-    SILENCE_AFTER_SPEECH = "silence_after_speech"  # Silence detected after speech
+    IDLE = "idle"
+    SPEECH = "speech"
+    SILENCE_AFTER_SPEECH = "silence_after_speech"
 
 
 class VoiceActivityDetector:
-    """
-    Energy-based VAD that segments audio into utterances.
-
-    Uses RMS energy thresholds and silence duration to detect speech boundaries.
-    """
+    """Silero VAD with 512-sample windowing."""
 
     def __init__(self, vad_config: VADConfig, audio_config: AudioConfig):
         self.vad_config = vad_config
         self.audio_config = audio_config
 
+        self.model = load_silero_vad(onnx=True)
+
         self._state = VADState.IDLE
         self._silence_frame_count = 0
         self._buffer = bytearray()
+        self._streaming_buffer = bytearray()
 
-        logger.info(
-            "VAD initialized: silence_thresh=%.4f speech_thresh=%.4f",
-            vad_config.silence_threshold,
-            vad_config.speech_threshold,
+        self.WINDOW_SIZE_SAMPLES = 512  # Silero v5 @ 16kHz
+        self.BYTES_PER_WINDOW = (
+            self.WINDOW_SIZE_SAMPLES * self.audio_config.bytes_per_sample
         )
 
-    def _calculate_energy(self, audio_chunk: bytes) -> float:
-        """Calculate RMS energy of audio chunk."""
-        pcm = np.frombuffer(audio_chunk, dtype=np.float32)
-        return float(np.sqrt(np.mean(pcm**2)))
+        logger.info("Silero VAD initialized: Fixed 512-sample windowing.")
 
-    def _get_buffer_duration(self) -> float:
-        """Get duration of buffered audio in seconds."""
-        num_samples = len(self._buffer) // self.audio_config.bytes_per_sample
-        return num_samples / self.audio_config.sample_rate
+    def _get_speech_probability(self, audio_chunk: bytes) -> float:
+        audio_np = np.frombuffer(audio_chunk, dtype=np.float32).copy()
+        tensor_audio = torch.from_numpy(audio_np)
+        speech_prob = self.model(tensor_audio, self.audio_config.sample_rate).item()
+        return speech_prob
 
     def process_chunk(self, audio_chunk: bytes) -> Optional[bytes]:
-        """
-        Process an audio chunk and return complete utterance if ready.
+        """Returns complete utterance when speech ends, else None."""
+        self._streaming_buffer.extend(audio_chunk)
 
-        Args:
-            audio_chunk: Raw PCM audio bytes (float32)
+        while len(self._streaming_buffer) >= self.BYTES_PER_WINDOW:
+            window = bytes(self._streaming_buffer[: self.BYTES_PER_WINDOW])
+            self._streaming_buffer = self._streaming_buffer[self.BYTES_PER_WINDOW :]
 
-        Returns:
-            Complete utterance bytes if end detected, None otherwise
-        """
-        energy = self._calculate_energy(audio_chunk)
-        self._buffer.extend(audio_chunk)
-        duration = self._get_buffer_duration()
+            speech_prob = self._get_speech_probability(window)
 
-        # State machine for speech detection
-        if energy >= self.vad_config.speech_threshold:
-            # Definite speech detected
-            if self._state != VADState.SPEECH:
-                logger.debug("Speech START: energy=%.4f", energy)
+            if speech_prob >= self.vad_config.speech_threshold:
+                if self._state == VADState.IDLE:
+                    logger.debug("Speech START: prob=%.4f", speech_prob)
+                    max_pre_roll = self.BYTES_PER_WINDOW * 6
+                    if len(self._buffer) > max_pre_roll:
+                        self._buffer = self._buffer[-max_pre_roll:]
+
                 self._state = VADState.SPEECH
-            self._silence_frame_count = 0
-
-        elif energy < self.vad_config.silence_threshold:
-            # Definite silence detected
-            if self._state == VADState.SPEECH:
-                self._silence_frame_count += 1
-                self._state = VADState.SILENCE_AFTER_SPEECH
-            elif self._state == VADState.IDLE:
-                # Clear noise buffer if it's been accumulating too long
-                if duration > self.vad_config.noise_buffer_clear_seconds:
-                    logger.debug("Clearing noise buffer: duration=%.2fs", duration)
-                    self._buffer.clear()
-                    self._silence_frame_count = 0
-
-        else:
-            # Ambiguous energy level - maintain current state
-            if self._state == VADState.SPEECH:
-                # Reset silence counter if we're in speech
                 self._silence_frame_count = 0
+                self._buffer.extend(window)
 
-        # Check for utterance completion conditions
-        utterance_complete = False
+            else:
+                if self._state == VADState.SPEECH:
+                    self._silence_frame_count = 1
+                    self._state = VADState.SILENCE_AFTER_SPEECH
+                    self._buffer.extend(window)
 
-        if self._state == VADState.SPEECH:
+                elif self._state == VADState.SILENCE_AFTER_SPEECH:
+                    self._silence_frame_count += 1
+                    self._buffer.extend(window)
+
+                elif self._state == VADState.IDLE:
+                    max_pre_roll = self.BYTES_PER_WINDOW * 6
+                    self._buffer.extend(window)
+                    if len(self._buffer) > max_pre_roll:
+                        self._buffer = self._buffer[-max_pre_roll:]
+
+            duration = self._get_buffer_duration()
+
+            if self._state == VADState.SILENCE_AFTER_SPEECH:
+                if self._silence_frame_count >= self.vad_config.silence_frames_required:
+                    if duration >= self.vad_config.min_utterance_seconds:
+                        return self._finalize_utterance(duration)
+                    else:
+                        logger.debug("Utterance too short (%.2fs), resetting", duration)
+                        self._reset()
+
             if duration >= self.vad_config.max_utterance_seconds:
-                logger.debug("Max duration reached: %.2fs", duration)
-                utterance_complete = True
-
-        if self._state == VADState.SILENCE_AFTER_SPEECH:
-            if self._silence_frame_count >= self.vad_config.silence_frames_required:
-                logger.debug(
-                    "Silence detected after speech: frames=%d",
-                    self._silence_frame_count,
-                )
-                utterance_complete = True
-
-        # Extract and return utterance if complete
-        if utterance_complete:
-            if duration < self.vad_config.min_utterance_seconds:
-                logger.debug(
-                    "Utterance too short: %.2fs < %.2fs, discarding",
-                    duration,
-                    self.vad_config.min_utterance_seconds,
-                )
-                self._reset()
-                return None
-
-            logger.info(
-                "Utterance complete: duration=%.2fs bytes=%d",
-                duration,
-                len(self._buffer),
-            )
-            utterance = bytes(self._buffer)
-            self._reset()
-            return utterance
+                logger.warning("Max utterance duration reached, forcing finalization")
+                return self._finalize_utterance(duration)
 
         return None
 
+    def _finalize_utterance(self, duration: float) -> bytes:
+        logger.info(
+            "Utterance complete: duration=%.2fs bytes=%d", duration, len(self._buffer)
+        )
+        utterance = bytes(self._buffer)
+        self._reset()
+        return utterance
+
+    def _get_buffer_duration(self) -> float:
+        return (
+            len(self._buffer) / self.audio_config.bytes_per_sample
+        ) / self.audio_config.sample_rate
+
     def _reset(self) -> None:
-        """Reset VAD state for next utterance."""
         self._buffer.clear()
+        self._streaming_buffer.clear()
         self._silence_frame_count = 0
         self._state = VADState.IDLE
+        logger.debug("VAD state reset to IDLE")
 
     def get_state_debug_info(self) -> dict:
-        """Get current state for debugging/logging."""
         return {
             "state": self._state.value,
             "silence_frames": self._silence_frame_count,
             "buffer_duration": self._get_buffer_duration(),
-            "buffer_bytes": len(self._buffer),
         }

@@ -10,14 +10,26 @@ load_dotenv(env_path)
 
 @dataclass(frozen=True)
 class LlamaConfig:
-    """Configuration for the Llama.cpp server."""
-
     exe_path: str
     model_path: str
+
     host: str = "0.0.0.0"
     port: int = 8080
-    gpu_layers: int = 99
-    context_size: int = 4096
+
+    gpu_layers: int = -1
+    context_size: int = 8192
+
+    max_history_turns: int = 10
+
+    threads: int = 12
+    threads_batch: int = 12
+    batch_size: int = 2048
+    ubatch_size: int = 512
+    parallel: int = 1
+
+    mlock: bool = True
+    no_mmap: bool = True
+
     startup_delay_seconds: float = 10.0
     request_timeout_seconds: float = 60.0
 
@@ -28,8 +40,6 @@ class LlamaConfig:
 
 @dataclass(frozen=True)
 class PiperConfig:
-    """Configuration for Piper TTS."""
-
     exe_path: str
     model_path: str
 
@@ -40,8 +50,6 @@ class PiperConfig:
 
 @dataclass(frozen=True)
 class WhisperConfig:
-    """Configuration for Whisper STT."""
-
     model_size: str = "small.en"
     device: str = "cuda"
     compute_type: str = "float16"
@@ -50,44 +58,34 @@ class WhisperConfig:
 
 @dataclass(frozen=True)
 class VADConfig:
-    """Voice Activity Detection parameters."""
-
-    # Energy thresholds (RMS amplitude)
-    silence_threshold: float = 0.001
-    speech_threshold: float = 0.002
-
-    # Timing parameters
-    silence_frames_required: int = 15  # ~300ms at 20ms frames
+    speech_threshold: float = 0.45
+    silence_threshold: float = 0.35
+    silence_frames_required: int = 10  # ~320ms at 32ms/frame
     min_utterance_seconds: float = 0.5
-    max_utterance_seconds: float = 10.0
+    max_utterance_seconds: float = 12.0
     noise_buffer_clear_seconds: float = 1.0
 
 
 @dataclass(frozen=True)
-class AudioConfig:
-    """Audio processing parameters."""
-
-    sample_rate: int = 16000
-    channels: int = 1
-    dtype: str = "float32"  # numpy dtype string
-    bytes_per_sample: int = 4  # float32
-
-
-@dataclass(frozen=True)
 class WebSocketConfig:
-    """WebSocket server configuration."""
-
     host: str = "0.0.0.0"
     port: int = 8000
-    audio_queue_maxsize: int = 100
-    event_queue_maxsize: int = 50
+    audio_queue_maxsize: int = 200
+    event_queue_maxsize: int = 200
+
     heartbeat_interval_seconds: float = 30.0
 
 
 @dataclass(frozen=True)
-class LoggingConfig:
-    """Logging configuration."""
+class AudioConfig:
+    sample_rate: int = 16000
+    channels: int = 1
+    dtype: str = "float32"
+    bytes_per_sample: int = 4
 
+
+@dataclass(frozen=True)
+class LoggingConfig:
     level: str = "INFO"
     rate_limit_seconds: float = 5.0
 
@@ -99,7 +97,9 @@ CONFIG = {
     ),
     "piper": PiperConfig(
         exe_path=os.getenv("PIPER_EXE_PATH", r".\server\piper\piper.exe"),
-        model_path=os.getenv("PIPER_MODEL_PATH", r".\server\piper\models\en_US-amy-medium.onnx"),
+        model_path=os.getenv(
+            "PIPER_MODEL_PATH", r".\server\piper\models\en_US-amy-medium.onnx"
+        ),
     ),
     "whisper": WhisperConfig(),
     "vad": VADConfig(),

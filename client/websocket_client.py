@@ -8,41 +8,26 @@ from client.config import ClientConfig
 from client.audio.audio_capture import AudioCapture
 from client.audio.audio_playback import AudioPlayback
 from client.audio.vad import VoiceActivityDetector
+from client.audio.feedback import AudioFeedback
 
 logger = logging.getLogger(__name__)
 
 
 class VoiceAssistantClient:
-    """
-    Represents a voice assistant client capable of handling audio data, communication with a server,
-    and processing received messages for real-time interaction.
-
-    Provides methods to manage the connection, handle communication, and process audio and data
-    messages between a client application and a server. This class is designed to operate as an
-    asynchronous component, leveraging asyncio for concurrent operations.
-
-    :ivar config: The configuration settings required for the client, including audio and server
-                  settings.
-    :type config: ClientConfig
-    :ivar capture: The audio capture module responsible for recording audio input.
-    :type capture: AudioCapture
-    :ivar playback: The audio playback module responsible for outputting audio.
-    :type playback: AudioPlayback
-    :ivar vad: A voice activity detector used for processing audio and detecting if speech is present.
-    :type vad: VoiceActivityDetector
-    """
+    """WebSocket client that streams audio to server and plays responses."""
 
     def __init__(self, config: ClientConfig):
         self.config = config
 
-        # Audio components
         self.capture = AudioCapture(config.capture)
         self.playback = AudioPlayback(config.playback)
         self.vad = VoiceActivityDetector(config.vad, config.capture.sample_rate)
-
-        # Connection state
+        self.feedback = AudioFeedback(config.playback.sample_rate)
         self._websocket = None
         self._running = False
+        self._tts_active = False
+        self._interrupt_sent = False
+        self._feedback_enabled = True
 
         logger.info("VoiceAssistantClient initialized")
 
@@ -52,38 +37,31 @@ class VoiceAssistantClient:
         try:
             async with websockets.connect(
                 self.config.server.url,
-                max_size=None,  # No message size limit
-                ping_interval=20,  # Keep connection alive
-                ping_timeout=10,
+                max_size=None,
+                ping_interval=60,
+                ping_timeout=30,
             ) as websocket:
                 self._websocket = websocket
                 self._running = True
 
                 logger.info("Connected to server")
 
-                # Start audio I/O
                 self.capture.start()
                 self.playback.start()
-
-                # Send initial hello message
                 await self._send_hello()
 
-                # Run send/receive tasks concurrently
                 send_task = asyncio.create_task(self._send_loop())
                 recv_task = asyncio.create_task(self._receive_loop())
 
-                # Wait for either task to complete (error or shutdown)
                 done, pending = await asyncio.wait(
                     [send_task, recv_task],
                     return_when=asyncio.FIRST_COMPLETED,
                 )
 
-                # Log task completion
                 for task in done:
                     if task.exception():
                         logger.error("Task failed: %s", task.exception())
 
-                # Cancel remaining tasks
                 for task in pending:
                     task.cancel()
 
@@ -114,16 +92,14 @@ class VoiceAssistantClient:
 
         try:
             while self._running and self._websocket:
-                # Read audio chunk from microphone (blocks until available)
                 chunk = self.capture.read(timeout=1.0)
+                is_speech = self.vad.process_frame(chunk)
 
-                # Update VAD state (for logging/feedback)
-                self.vad.process_frame(chunk)
+                # Barge-in: detect speech during TTS playback
+                if is_speech and self._tts_active and not self._interrupt_sent:
+                    await self._send_interrupt()
 
-                # Send to server as binary message
                 await self._websocket.send(chunk.tobytes())
-
-                # Small sleep to reduce CPU usage
                 await asyncio.sleep(0.001)
 
         except asyncio.CancelledError:
@@ -133,6 +109,14 @@ class VoiceAssistantClient:
             logger.exception("Send loop error")
             raise
 
+    async def _send_interrupt(self) -> None:
+        """Send interrupt signal to server (barge-in)."""
+        if self._websocket and not self._interrupt_sent:
+            self._interrupt_sent = True
+            await self._websocket.send(json.dumps({"type": "interrupt"}))
+            self.playback.stop_playback()
+            logger.info("Sent interrupt (barge-in)")
+
     async def _receive_loop(self) -> None:
         logger.info("Receive loop started")
 
@@ -141,10 +125,8 @@ class VoiceAssistantClient:
                 message = await self._websocket.recv()
 
                 if isinstance(message, bytes):
-                    # Binary audio data from TTS
                     self._handle_audio(message)
                 elif isinstance(message, str):
-                    # JSON control message
                     self._handle_json_message(message)
 
         except asyncio.CancelledError:
@@ -173,11 +155,22 @@ class VoiceAssistantClient:
                 text = data.get("text", "")
                 print(f"You: {text}")
                 logger.info("Transcription: %s", text)
+                self._play_feedback("listening")
 
             elif msg_type == "llm_response":
                 text = data.get("text", "")
                 print(f"Assistant: {text}")
                 logger.info("LLM response received")
+
+            elif msg_type == "tts_start":
+                self._tts_active = True
+                self._interrupt_sent = False
+                logger.debug("TTS started")
+
+            elif msg_type == "tts_stop":
+                self._tts_active = False
+                self._interrupt_sent = False
+                logger.debug("TTS stopped")
 
             else:
                 logger.debug("Unknown message type: %s", msg_type)
@@ -186,6 +179,17 @@ class VoiceAssistantClient:
             logger.warning("Received invalid JSON: %s", message[:100])
         except Exception:
             logger.exception("Error handling JSON message")
+
+    def _play_feedback(self, tone_name: str) -> None:
+        """Play a feedback tone if enabled."""
+        if not self._feedback_enabled:
+            return
+        try:
+            tone = self.feedback.get_tone(tone_name)
+            if tone:
+                self.playback.play(tone)
+        except Exception:
+            logger.debug("Failed to play feedback tone: %s", tone_name)
 
     async def _cleanup(self) -> None:
         logger.info("Cleaning up client resources")

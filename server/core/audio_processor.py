@@ -1,10 +1,7 @@
-"""
-Audio processing pipeline: VAD -> STT -> LLM -> TTS.
-"""
-
 import asyncio
 import logging
 import time
+import re
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -24,62 +21,70 @@ logger = logging.getLogger(__name__)
 
 
 class AudioProcessor:
-    """
-    Processes audio and handles interactions for a given WebSocket connection.
+    """Pipeline: VAD → STT → LLM (streaming) → TTS → audio out."""
 
-    The AudioProcessor class integrates various components, including Voice Activity
-    Detection (VAD), Speech-to-Text (STT), Large Language Model (LLM), and Text-to-Speech
-    (TTS). It processes incoming audio streams in an asynchronous manner, detects complete
-    utterances through VAD, and passes these utterances through the STT -> LLM -> TTS
-    pipeline to generate and send responses back through the WebSocket connection. The
-    class also supports direct text input for text-only clients or debugging purposes.
-
-    :ivar connection: Active WebSocket connection instance for audio processing.
-    :type connection: WebSocketConnection
-    """
-
-    def __init__(self, connection: "WebSocketConnection"):
+    def __init__(self, connection: "WebSocketConnection", session_id: str = None):
         self.connection = connection
 
-        # Initialize components
         self.vad = VoiceActivityDetector(CONFIG["vad"], CONFIG["audio"])
         self.stt = WhisperSTT(CONFIG["whisper"])
         self.tts = PiperTTS(CONFIG["piper"])
-        self.llm = LLMClient(CONFIG["llama"])
 
-        # Rate-limited logger for periodic status updates
+        # Use provided session_id or connection_id for persistence
+        self._session_id = session_id or connection.connection_id
+        self.llm = LLMClient(CONFIG["llama"], session_id=self._session_id)
+
         self._rl_logger = RateLimitedLogger(
             logger, CONFIG["logging"].rate_limit_seconds
         )
-
-        # Performance timing statistics
         self.timing_stats = TimingStats()
 
         self._chunk_count = 0
+        self._pipeline_running = False
+        self._interrupted = False
+        self._tts_active = False
 
         logger.info(
-            "AudioProcessor initialized for connection %s", connection.connection_id
+            "AudioProcessor initialized for connection %s (session: %s)",
+            connection.connection_id,
+            self._session_id,
         )
 
-    async def run(self) -> None:
-        """
-        Main processing loop.
+    def load_session(self, session_id: str) -> bool:
+        """Load a previous conversation session."""
+        self._session_id = session_id
+        return self.llm.load_history(session_id)
 
-        Consumes audio chunks, performs VAD, and triggers STT/LLM/TTS pipeline
-        when complete utterances are detected.
-        """
+    def save_session(self) -> bool:
+        """Save current conversation to disk."""
+        return self.llm.save_history()
+
+    @property
+    def session_id(self) -> str:
+        return self._session_id
+
+    def interrupt(self) -> None:
+        """Signal to cancel the current pipeline (barge-in)."""
+        if self._pipeline_running:
+            self._interrupted = True
+            logger.info(
+                "[%s] Pipeline interrupted (barge-in)", self.connection.connection_id
+            )
+
+    @property
+    def is_tts_active(self) -> bool:
+        return self._tts_active
+
+    async def run(self) -> None:
         logger.info("[%s] AudioProcessor started", self.connection.connection_id)
 
         try:
             while True:
-                # Get audio chunk from queue
                 chunk = await self.connection.audio_queue.get()
                 self._chunk_count += 1
 
-                # Process through VAD
                 utterance = self.vad.process_chunk(chunk)
 
-                # Periodic debug logging
                 if self._chunk_count % 50 == 0:
                     energy = self._calculate_energy(chunk)
                     vad_info = self.vad.get_state_debug_info()
@@ -93,7 +98,6 @@ class AudioProcessor:
                         vad_info["buffer_duration"],
                     )
 
-                # If complete utterance detected, process it
                 if utterance:
                     await self._process_utterance(utterance)
 
@@ -107,25 +111,19 @@ class AudioProcessor:
             raise
 
     async def _process_utterance(self, utterance: bytes) -> None:
-        """
-        Process a complete utterance through STT -> LLM -> TTS pipeline.
+        if self._pipeline_running:
+            self.interrupt()
+            await asyncio.sleep(0.1)
 
-        Runs in background task to avoid blocking audio queue processing.
-        """
         asyncio.create_task(self._pipeline_task(utterance))
 
     async def _pipeline_task(self, utterance: bytes) -> None:
-        """
-        Execute the full processing pipeline for an utterance.
-
-        Args:
-            utterance: Complete audio utterance as PCM bytes
-        """
         pipeline_start = time.perf_counter()
-        try:
-            conn_id = self.connection.connection_id
+        conn_id = self.connection.connection_id
+        self._pipeline_running = True
+        self._interrupted = False
 
-            # Convert bytes to numpy array for STT
+        try:
             pcm = np.frombuffer(utterance, dtype=np.float32)
             audio_duration = len(pcm) / CONFIG["audio"].sample_rate
 
@@ -136,109 +134,164 @@ class AudioProcessor:
                 len(pcm),
             )
 
-            # Speech-to-Text
+            if self._interrupted:
+                return
+
             stt_start = time.perf_counter()
-            transcript = self.stt.transcribe(pcm)
+            transcript = await self.stt.transcribe_async(pcm)
             stt_latency = time.perf_counter() - stt_start
             self.timing_stats.record("stt", stt_latency)
 
+            if self._interrupted:
+                return
+
             if not transcript:
-                logger.warning("[%s] Empty transcription, skipping pipeline", conn_id)
+                logger.warning("[%s] Empty transcription", conn_id)
                 return
 
             logger.info(
-                "[%s] Transcription: %s (STT: %.3fs)", conn_id, transcript, stt_latency
+                "[%s] Transcription: %s (%.3fs)", conn_id, transcript, stt_latency
             )
-
-            # Send transcription to client
             await self.connection.send_event(
-                {
-                    "type": "transcription",
-                    "text": transcript,
-                }
+                {"type": "transcription", "text": transcript}
             )
 
-            # LLM inference
-            llm_start = time.perf_counter()
-            response = await self.llm.get_completion(transcript)
-            llm_latency = time.perf_counter() - llm_start
-            self.timing_stats.record("llm", llm_latency)
-
-            if not response:
-                logger.warning("[%s] Empty LLM response", conn_id)
-                return
-
-            logger.info(
-                "[%s] LLM response: %s (LLM: %.3fs)", conn_id, response[:100], llm_latency
-            )
-
-            # Send LLM response to client
-            await self.connection.send_event(
-                {
-                    "type": "llm_response",
-                    "text": response,
-                }
-            )
-
-            # Text-to-Speech
-            tts_start = time.perf_counter()
-            audio_bytes = self.tts.synthesize(response)
-            tts_latency = time.perf_counter() - tts_start
-            self.timing_stats.record("tts", tts_latency)
-
-            if audio_bytes:
-                await self.connection.send_audio(audio_bytes)
-                # End-to-end latency (from utterance detection to audio sent)
-                e2e_latency = time.perf_counter() - pipeline_start
-                self.timing_stats.record("end_to_end", e2e_latency)
-
-                logger.info(
-                    "[%s] Pipeline complete: E2E=%.3fs (STT=%.3fs LLM=%.3fs TTS=%.3fs)",
-                    conn_id,
-                    e2e_latency,
-                    stt_latency,
-                    llm_latency,
-                    tts_latency,
-                )
-            else:
-                logger.warning("[%s] TTS synthesis failed or empty", conn_id)
+            await self._streaming_llm_tts_pipeline(transcript, conn_id, pipeline_start)
 
         except Exception:
-            logger.exception(
-                "[%s] Pipeline processing failed",
-                self.connection.connection_id,
-            )
+            logger.exception("[%s] Pipeline failed", conn_id)
+        finally:
+            self._pipeline_running = False
+            self._tts_active = False
+            self._interrupted = False
 
     async def handle_text_message(self, text: str) -> None:
-        """
-        Handle direct text input (bypass STT).
-
-        Used for debugging or text-only clients.
-        """
+        """Direct text input, bypasses STT."""
         if not text or not text.strip():
             return
 
         logger.info("[%s] Text input: %s", self.connection.connection_id, text)
 
-        # Skip STT, go directly to LLM
-        response = await self.llm.get_completion(text)
-
-        if not response:
-            return
-
-        await self.connection.send_event(
-            {
-                "type": "llm_response",
-                "text": response,
-            }
+        await self.connection.send_event({"type": "transcription", "text": text})
+        await self._streaming_llm_tts_pipeline(
+            text, self.connection.connection_id, time.perf_counter()
         )
 
-        audio_bytes = self.tts.synthesize(response)
-        if audio_bytes:
-            await self.connection.send_audio(audio_bytes)
+    async def _streaming_llm_tts_pipeline(
+        self, input_text: str, conn_id: str, pipeline_start: float
+    ) -> None:
+        llm_start = time.perf_counter()
+        accumulated_text = ""
+        pending_sentence = ""
+
+        await self.connection.send_event({"type": "tts_start"})
+        self._tts_active = True
+
+        # TTS prefetch queue: (sentence, synthesis_task)
+        pending_audio_task = None
+        pending_audio_sentence = None
+
+        async def send_pending_audio():
+            """Send any pending audio that was prefetched."""
+            nonlocal pending_audio_task, pending_audio_sentence
+            if pending_audio_task is not None:
+                audio_chunk = await pending_audio_task
+                if audio_chunk and not self._interrupted:
+                    await self.connection.send_audio(audio_chunk)
+                    logger.debug(
+                        "[%s] Streamed: %s (%d bytes)",
+                        conn_id,
+                        pending_audio_sentence,
+                        len(audio_chunk),
+                    )
+                pending_audio_task = None
+                pending_audio_sentence = None
+
+        try:
+            async for chunk in self.llm.stream_completion(input_text):
+                if self._interrupted:
+                    logger.info(
+                        "[%s] Pipeline interrupted during LLM streaming", conn_id
+                    )
+                    await self.connection.send_event({"type": "tts_stop"})
+                    return
+
+                if not chunk:
+                    continue
+
+                accumulated_text += chunk
+                pending_sentence += chunk
+
+                await self.connection.send_event(
+                    {
+                        "type": "partial_llm_response",
+                        "text": chunk,
+                        "full_text": accumulated_text,
+                    }
+                )
+
+                while True:
+                    if self._interrupted:
+                        break
+
+                    match = re.search(r"([.!?]|[,])\s+", pending_sentence)
+                    if not match:
+                        break
+
+                    end_pos = match.end()
+                    sentence = pending_sentence[:end_pos].strip()
+                    pending_sentence = pending_sentence[end_pos:]
+
+                    if sentence:
+                        # Send any previously prefetched audio
+                        await send_pending_audio()
+
+                        # Start synthesizing this sentence (prefetch)
+                        pending_audio_task = asyncio.create_task(
+                            self.tts.synthesize(sentence + " ")
+                        )
+                        pending_audio_sentence = sentence
+
+            # Send any remaining prefetched audio
+            await send_pending_audio()
+
+            # Handle final incomplete sentence
+            if pending_sentence.strip() and not self._interrupted:
+                audio_chunk = await self.tts.synthesize(pending_sentence)
+                if audio_chunk and not self._interrupted:
+                    await self.connection.send_audio(audio_chunk)
+                    logger.debug(
+                        "[%s] Streamed final: %s (%d bytes)",
+                        conn_id,
+                        pending_sentence,
+                        len(audio_chunk),
+                    )
+
+            await self.connection.send_event({"type": "tts_stop"})
+
+            if not self._interrupted:
+                await self.connection.send_event(
+                    {"type": "llm_response", "text": accumulated_text}
+                )
+
+                llm_latency = time.perf_counter() - llm_start
+                e2e_latency = time.perf_counter() - pipeline_start
+                self.timing_stats.record("llm", llm_latency)
+                self.timing_stats.record("end_to_end", e2e_latency)
+
+                logger.info(
+                    "[%s] Streaming complete: %d chars in %.3fs",
+                    conn_id,
+                    len(accumulated_text),
+                    e2e_latency,
+                )
+
+        except Exception:
+            logger.exception("[%s] Streaming failed", conn_id)
+        finally:
+            self._tts_active = False
 
     @staticmethod
     def _calculate_energy(chunk: bytes) -> float:
-        """Calculate RMS energy for logging."""
         pcm = np.frombuffer(chunk, dtype=np.float32)
         return float(np.sqrt(np.mean(pcm**2)))

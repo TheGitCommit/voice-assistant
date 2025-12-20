@@ -9,19 +9,6 @@ logger = logging.getLogger(__name__)
 
 
 class DeepSeekLLM:
-    """
-    Represents a client for interacting with the DeepSeek API.
-
-    This class provides functionalities to communicate with the DeepSeek API
-    to generate text completions using a specified model and configuration.
-    The client ensures secure API interactions by utilizing an authentication
-    key and handles response validation and errors gracefully.
-
-    :ivar config: Configuration for DeepSeek client, including model settings,
-        API key, base URL, and generation parameters like max tokens and temperature.
-    :type config: DeepSeekConfig
-    """
-
     def __init__(self, config: DeepSeekConfig):
         self.config = config
 

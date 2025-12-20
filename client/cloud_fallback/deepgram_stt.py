@@ -10,18 +10,6 @@ logger = logging.getLogger(__name__)
 
 
 class DeepgramSTT:
-    """
-    A class for accessing Deepgram Speech-to-Text (STT) API.
-
-    This class provides functionality to transcribe audio files using the
-    Deepgram STT capabilities. It embeds methods to handle audio data conversion,
-    interacts with Deepgram's API, and parses the transcription response.
-
-    :ivar config: Holds configuration settings including API key, model type,
-        and language settings for the Deepgram API.
-    :type config: DeepgramConfig
-    """
-
     def __init__(self, config: DeepgramConfig):
         self.config = config
 
@@ -32,7 +20,6 @@ class DeepgramSTT:
 
     async def transcribe(self, audio: np.ndarray, sample_rate: int) -> str:
         try:
-            # Convert float32 to int16 PCM
             audio_int16 = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16)
             audio_bytes = audio_int16.tobytes()
 
@@ -62,7 +49,6 @@ class DeepgramSTT:
 
                 data = response.json()
 
-                # Extract transcript from response
                 transcript = ""
                 if "results" in data and "channels" in data["results"]:
                     channels = data["results"]["channels"]

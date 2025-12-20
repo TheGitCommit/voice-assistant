@@ -11,17 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class AudioCapture:
-    """
-    Represents an audio capturing utility that uses an input stream to capture
-    audio data according to a specified configuration. This class provides
-    methods for starting and stopping audio capture, reading audio data, and
-    checking if the audio stream is running. It manages a queue to store
-    audio data chunks and handles streaming operations efficiently.
-
-    :ivar config: Configuration object for audio capture settings, including
-        sample rate, channels, chunk size, and queue maximum size.
-    :type config: AudioCaptureConfig
-    """
+    """Captures microphone audio into a queue for async consumption."""
 
     def __init__(self, config: AudioCaptureConfig):
         self.config = config
@@ -46,13 +36,11 @@ class AudioCapture:
             logger.warning("Audio capture status: %s", status)
             return
 
-        # Flatten and copy to avoid issues with internal buffers
         chunk = indata.reshape(-1).copy()
 
         try:
             self._queue.put_nowait(chunk)
         except queue.Full:
-            # Drop frame if queue is full (prevents blocking audio thread)
             logger.debug("Audio queue full, dropping frame")
 
     def start(self) -> None:

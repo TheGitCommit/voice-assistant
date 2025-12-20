@@ -7,7 +7,6 @@ from dataclasses import replace
 
 import httpx
 
-# add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent.absolute()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -39,7 +38,6 @@ async def check_server_health(url: str, timeout: float = 5.0) -> bool:
 
             if response.status_code == 200:
                 data = response.json()
-                # log once to avoid spamming in the loop
                 logger.debug("Server health: %s", data)
                 return data.get("status") == "healthy"
 
@@ -56,11 +54,9 @@ async def check_server_health(url: str, timeout: float = 5.0) -> bool:
 async def main() -> None:
     logger.info("===Voice Assistant Client Starting===")
 
-    # control flags
     stop_event = asyncio.Event()
     current_client = None
 
-    # handles ctrl+c
     def signal_handler(sig, frame):
         logger.info("Received interrupt signal - Stopping...")
         stop_event.set()
@@ -74,13 +70,11 @@ async def main() -> None:
 
         logger.info("Evaluating connection mode...")
 
-        # local server health (short timeout for responsiveness)
         server_available = await check_server_health(
             DEFAULT_CONFIG.server.url, timeout=2.0
         )
 
         run_config = DEFAULT_CONFIG
-        mode = "unknown"
 
         if server_available:
             logger.info("Local server FOUND. Mode: LOCAL")
@@ -90,7 +84,6 @@ async def main() -> None:
             logger.warning("Local server UNREACHABLE. Mode: CLOUD")
             mode = "cloud"
 
-            # switch to 24000Hz for Deepgram
             new_playback = replace(run_config.playback, sample_rate=24000)
             run_config = replace(run_config, playback=new_playback)
             logger.info("Updated playback rate to 24000Hz for Cloud TTS")
@@ -115,10 +108,6 @@ async def main() -> None:
                 run_config.playback.sample_rate,
             )
 
-            # It will block here until:
-            #   1. the connection is lost (Local dies)
-            #   2. User presses Ctrl+C (stop event)
-            #   3. fatal error occurs
             await client.run()
 
         except Exception as e:
@@ -126,7 +115,6 @@ async def main() -> None:
         finally:
             current_client = None
 
-        # recovery phase
         if not stop_event.is_set():
             logger.warning("Connection lost. Re-evaluating in 2 seconds...")
             await asyncio.sleep(2)
