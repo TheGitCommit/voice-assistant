@@ -9,30 +9,30 @@ Local-first voice assistant with real-time streaming. All inference runs on your
 │                         Client                               │
 ├──────────────────────────────────────────────────────────────┤
 │                                                              │
-│  ┌─────────────┐    ┌──────────┐    ┌──────────────┐        │
-│  │ Microphone  │───▶│   VAD    │───▶│  Mode Logic  │        │
-│  └─────────────┘    │(WebRTC)  │    └──────┬───────┘        │
+│  ┌─────────────┐    ┌──────────┐    ┌──────────────┐         │
+│  │ Microphone  │───▶│   VAD    │───▶  Mode Logic  │         │
+│  └─────────────┘    │(WebRTC)  │    └──────┬───────┘         │
 │                     │          │           │                 │
-│                     │ Barge-in │  ┌────────┴────────┐       │
-│                     │ detection│  │                 │       │
-│                     └──────────┘  │   Server up?    │       │
-│                                   │                 │       │
-│                         ┌─────────┴─────────┐       │       │
-│                         │                   │       │       │
-│                        YES                 NO       │       │
-│                         │                   │       │       │
-│                         ▼                   ▼       │       │
-│                  ┌─────────────┐    ┌─────────────┐ │       │
-│                  │ LOCAL MODE  │    │ CLOUD MODE  │ │       │
-│                  │ WebSocket   │    │ REST APIs   │ │       │
-│                  └──────┬──────┘    └──────┬──────┘ │       │
-│                         │                   │       │       │
-│  ┌─────────────────────┴───────────────────┘       │       │
-│  │                                                  │       │
-│  ▼                                                  │       │
-│  ┌─────────────┐    ┌──────────┐                   │       │
-│  │   Speaker   │◄───│ Feedback │ (beep tones)      │       │
-│  └─────────────┘    └──────────┘                   │       │
+│                     │ Barge-in │  ┌────────┴────────┐        │
+│                     │ detection│  │                 │        │
+│                     └──────────┘  │   Server up?    │        │
+│                                   │                 │        │
+│                         ┌─────────┴─────────┐       │        │
+│                         │                   │       │        │
+│                        YES                 NO       │        │
+│                         │                   │       │        │
+│                         ▼                   ▼       │        │
+│                  ┌─────────────┐    ┌─────────────┐ │        │
+│                  │ LOCAL MODE  │    │ CLOUD MODE  │ │        │
+│                  │ WebSocket   │    │ REST APIs   │ │        │
+│                  └──────┬──────┘    └──────┬──────┘ │        │
+│                         │                  │        │        │
+│  ┌─────────────────────────────────────────┘        │        │
+│  │                                                  │        │
+│  ▼                                                  │        │
+│  ┌─────────────┐    ┌──────────┐                    │        │
+│  │   Speaker   │◄───│ Feedback │ (beep tones)       │        │
+│  └─────────────┘    └──────────┘                    │        │
 └──────────────────────────────────────────────────────────────┘
             │                               │
             │ WebSocket                     │ HTTPS
@@ -57,7 +57,7 @@ Local-first voice assistant with real-time streaming. All inference runs on your
 │                          Server Pipeline                            │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
-│  Audio In ──▶ VAD ──▶ Whisper ──▶ Llama ──▶ Piper ──▶ Audio Out    │
+│  Audio In ──▶ VAD ──▶ Whisper ──▶ Llama ──▶ Piper ──▶ Audio Out  │
 │              (Silero)   (STT)      (LLM)    (TTS)                   │
 │                │                     │        │                     │
 │                │                     │        └─► Prefetch queue    │
@@ -69,9 +69,9 @@ Local-first voice assistant with real-time streaming. All inference runs on your
 │                                                                     │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Reliability:                                                       │
-│  • Llama health check every 30s, auto-restart on crash (5 retries) │
-│  • LLM calls: 3 retries with exponential backoff                   │
-│  • TTS calls: 2 retries with fixed delay                           │
+│  • Llama health check every 30s, auto-restart on crash (5 retries)  │
+│  • LLM calls: 3 retries with exponential backoff                    │
+│  • TTS calls: 2 retries with fixed delay                            │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -85,7 +85,7 @@ Client                                 Server
   │  [User speaks during playback]       │
   │  [Client VAD detects speech]         │
   │                                      │
-  │──────── {"type":"interrupt"} ───────▶│  Client sends interrupt
+  │──────── {"type":"interrupt"} ──────▶ │  Client sends interrupt
   │  [Stops speaker immediately]         │
   │                                      │  [Sets _interrupted=True]
   │                                      │  [Cancels LLM streaming]
@@ -134,7 +134,7 @@ Transcription received   440Hz (low)       Processing your speech
 │                    Session Lifecycle                         │
 ├──────────────────────────────────────────────────────────────┤
 │                                                              │
-│  Connect ──▶ Load session (if ID provided)                   │
+│  Connect ──▶ Load session (if ID provided)                  │
 │                     │                                        │
 │                     ▼                                        │
 │              ┌─────────────┐                                 │
@@ -147,7 +147,7 @@ Transcription received   440Hz (low)       Processing your speech
 │              saves to disk ────┘                             │
 │                     │                                        │
 │                     ▼                                        │
-│  Disconnect ──▶ Final save to sessions/{id}.json             │
+│  Disconnect ──▶ Final save to sessions/{id}.json            │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 
