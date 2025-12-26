@@ -86,14 +86,33 @@ class WebSocketConnection:
             raise
 
     async def receive_loop(
-        self, on_text_message=None, on_interrupt=None, on_load_session=None
+        self,
+        on_text_message=None,
+        on_interrupt=None,
+        on_load_session=None,
     ) -> None:
         try:
             logger.debug("[%s] Receive loop started", self.connection_id)
 
             while True:
-                msg = await self.websocket.receive()
+                try:
+                    msg = await self.websocket.receive()
+                except RuntimeError as e:
+                    # Handle disconnect during receive
+                    if "disconnect" in str(e).lower() or "closed" in str(e).lower():
+                        logger.info(
+                            "[%s] WebSocket disconnected during receive",
+                            self.connection_id,
+                        )
+                        break
+                    raise
+
                 msg_type = msg.get("type")
+
+                # Handle disconnect message type
+                if msg_type == "websocket.disconnect":
+                    logger.info("[%s] Received disconnect message", self.connection_id)
+                    break
 
                 if msg.get("bytes") is not None:
                     chunk = msg["bytes"]

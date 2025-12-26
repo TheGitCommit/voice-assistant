@@ -6,15 +6,25 @@ import time
 from typing import Optional
 
 from server.config import PiperConfig
+from server.inference.tts_base import BaseTTS
 
 logger = logging.getLogger(__name__)
 
 
-class PiperTTS:
+class PiperTTS(BaseTTS):
     def __init__(self, config: PiperConfig):
         self.config = config
         self._validate_installation()
         logger.info("Piper TTS initialized: model=%s", config.model_path)
+
+    @property
+    def name(self) -> str:
+        return "piper"
+
+    @property
+    def sample_rate(self) -> int:
+        # Piper outputs 22050Hz by default (varies by model)
+        return 22050
 
     def _validate_installation(self) -> None:
         if not os.path.exists(self.config.exe_path):

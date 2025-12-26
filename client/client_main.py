@@ -11,7 +11,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.absolute()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from client.config import DEFAULT_CONFIG
+from client.config.config import DEFAULT_CONFIG
 from client.cloud_fallback.cloud_config import is_cloud_configured
 from client.websocket_client import VoiceAssistantClient
 from client.cloud_fallback.cloud_processor import CloudAudioProcessor

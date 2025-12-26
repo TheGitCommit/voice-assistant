@@ -5,7 +5,7 @@ from collections import deque
 import numpy as np
 import sounddevice as sd
 
-from client.config import AudioPlaybackConfig
+from client.config.config import AudioPlaybackConfig
 
 logger = logging.getLogger(__name__)
 

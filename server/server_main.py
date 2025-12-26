@@ -6,6 +6,7 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
 PROJECT_ROOT = Path(__file__).parent.parent.absolute()
 if str(PROJECT_ROOT) not in sys.path:
@@ -13,8 +14,16 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from server.config import CONFIG
 from server.utils.logging_utils import setup_logging
+from server.utils.latency_monitor import get_latency_monitor, get_metrics
 from server.inference.llama_process_manager import LlamaProcessManager
 from server.networking.websocket_server import router as ws_router
+
+# Tool registry and MCP initialization
+from server.tools.builtin_tools import register_all_builtin_tools
+from server.tools.mcp_client import init_mcp_tools
+
+# RAG initialization
+from server.rag.knowledge_base import get_knowledge_base
 
 setup_logging(CONFIG["logging"].level)
 logger = logging.getLogger(__name__)
@@ -24,15 +33,48 @@ llama_manager = LlamaProcessManager(CONFIG["llama"])
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage Llama server lifecycle."""
-    logger.info("=== Starting Voice Assistant Server ===")
+    """Manage server lifecycle and initialize components."""
+    logger.info("=== Starting Sovereign Voice Assistant Server ===")
 
     monitor_task = None
 
     try:
+        # 1. Initialize Tool Registry
+        logger.info("Initializing tool registry...")
+        builtin_count = register_all_builtin_tools()
+        logger.info("Registered %d built-in tools", builtin_count)
+
+        # 2. Load MCP external tools
+        logger.info("Loading MCP tools from config...")
+        mcp_count = await init_mcp_tools()
+        logger.info("Loaded %d MCP tools", mcp_count)
+
+        # 3. Initialize RAG / Knowledge Base
+        logger.info("Initializing knowledge base...")
+        kb = await get_knowledge_base()
+        if await kb.initialize():
+            # Ingest any new documents
+            docs_indexed = await kb.ingest_documents()
+            stats = kb.get_stats()
+            logger.info(
+                "Knowledge base ready: %d documents (%d newly indexed)",
+                stats.get("document_count", 0),
+                docs_indexed,
+            )
+        else:
+            logger.warning(
+                "Knowledge base not available - RAG disabled. "
+                "Install dependencies: pip install chromadb sentence-transformers"
+            )
+
+        # 4. Initialize Latency Monitor
+        logger.info("Initializing latency monitor...")
+        get_latency_monitor()
+
+        # 5. Start Llama server
         llama_manager.start()
         logger.info(
-            "Waiting %.1fs for Llama model to load...",
+            "Waiting %.1fs for model to load...",
             CONFIG["llama"].startup_delay_seconds,
         )
         await asyncio.sleep(CONFIG["llama"].startup_delay_seconds)
@@ -48,10 +90,14 @@ async def lifespan(app: FastAPI):
         )
 
     except Exception:
-        logger.exception("Failed to start Llama server")
+        logger.exception("Failed to start server")
         raise
 
-    logger.info("Voice Assistant Server ready for connections")
+    logger.info("=" * 50)
+    logger.info("Sovereign Voice Assistant Server ready")
+    logger.info("  - Tools: %d built-in, %d MCP", builtin_count, mcp_count)
+    logger.info("  - RAG: %s", "enabled" if kb._initialized else "disabled")
+    logger.info("=" * 50)
 
     yield
 
@@ -84,10 +130,26 @@ async def health_check():
 
 @app.get("/metrics")
 async def metrics():
+    """Get latency and performance metrics."""
+    return JSONResponse(content=get_metrics())
+
+
+@app.get("/tools")
+async def list_tools():
+    """List all available tools."""
+    from server.tools.tool_registry import registry
+
     return {
-        "note": "Metrics endpoint - performance stats are logged per connection",
-        "llama_running": llama_manager.is_running(),
+        "tools": registry.get_tools_schema(),
+        "count": len(registry.list_tools()),
     }
+
+
+@app.get("/knowledge")
+async def knowledge_stats():
+    """Get knowledge base statistics."""
+    kb = await get_knowledge_base()
+    return kb.get_stats()
 
 
 def main():
@@ -104,6 +166,8 @@ def main():
         host=ws_config.host,
         port=ws_config.port,
         log_config=None,
+        ws_ping_interval=60.0,  # Ping every 60s
+        ws_ping_timeout=30.0,  # Wait 30s for pong
     )
 
 

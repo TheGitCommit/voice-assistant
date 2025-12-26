@@ -32,6 +32,42 @@ class LlamaProcessManager:
         if not os.path.exists(self.config.model_path):
             raise FileNotFoundError(f"Llama model not found: {self.config.model_path}")
 
+        # Check for split model files
+        model_path = self.config.model_path
+        if "-00001-of-" in model_path or "-0001-of-" in model_path:
+            # This is a split model, check if all parts exist
+            import re
+
+            base_match = re.search(r"(.+)-(\d{4,5})-of-(\d{4,5})\.gguf$", model_path)
+            if base_match:
+                base_name, part_num, total_parts_str = base_match.groups()
+                total_parts_int = int(total_parts_str)
+                part_num_int = int(part_num)
+
+                # Determine the format width from the original filename
+                format_width = len(part_num)
+
+                missing_parts = []
+                for i in range(1, total_parts_int + 1):
+                    if format_width == 5:
+                        part_file = f"{base_name}-{i:05d}-of-{total_parts_int:05d}.gguf"
+                    else:
+                        part_file = f"{base_name}-{i:04d}-of-{total_parts_int:04d}.gguf"
+
+                    if not os.path.exists(part_file):
+                        missing_parts.append(part_file)
+
+                if missing_parts:
+                    logger.warning(
+                        "Split model detected but some parts are missing:\n"
+                        "  Model: %s\n"
+                        "  Missing parts: %s\n"
+                        "  Ensure all %d parts are in the same directory.",
+                        model_path,
+                        ", ".join(missing_parts),
+                        total_parts_int,
+                    )
+
     def _build_command(self) -> list[str]:
         cmd = [
             self.config.exe_path,
@@ -78,26 +114,81 @@ class LlamaProcessManager:
             self.config.gpu_layers,
         )
 
+        # Verify model file exists
+        if not os.path.exists(self.config.model_path):
+            error_msg = f"Model file not found: {self.config.model_path}"
+            logger.error(error_msg)
+            raise FileNotFoundError(error_msg)
+
         cmd = self._build_command()
+        logger.debug("Llama command: %s", " ".join(cmd))
 
         try:
+            # Capture stderr to see actual error messages
             self._process = subprocess.Popen(
                 cmd,
-                creationflags=subprocess.CREATE_NEW_CONSOLE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0,
             )
 
             time.sleep(2)
 
             if self._process.poll() is not None:
+                # Process exited, read error output
+                stdout, stderr = self._process.communicate(timeout=1)
+                error_output = stderr.decode("utf-8", errors="ignore") if stderr else ""
+                stdout_output = (
+                    stdout.decode("utf-8", errors="ignore") if stdout else ""
+                )
+
                 logger.error("Llama server failed to start (immediate exit)")
+                logger.error("Exit code: %d", self._process.returncode)
+                if error_output:
+                    logger.error("Stderr: %s", error_output.strip())
+                if stdout_output:
+                    logger.error("Stdout: %s", stdout_output.strip())
+
+                # Provide helpful error message
+                if (
+                    "not found" in error_output.lower()
+                    or "cannot open" in error_output.lower()
+                ):
+                    error_msg = f"Model file not found or cannot be opened: {self.config.model_path}"
+                elif (
+                    "split" in error_output.lower()
+                    or "00001-of-00002" in self.config.model_path
+                ):
+                    error_msg = (
+                        f"Split model detected. Ensure all split files are in the same directory.\n"
+                        f"Model path: {self.config.model_path}\n"
+                        f"Expected files: qwen2.5-7b-instruct-q6_k-00001-of-00002.gguf and qwen2.5-7b-instruct-q6_k-00002-of-00002.gguf"
+                    )
+                elif error_output:
+                    error_msg = f"Llama server error: {error_output.strip()}"
+                else:
+                    error_msg = "Llama server process exited immediately (check model file and system resources)"
+
                 self._process = None
-                raise RuntimeError("Llama server process exited immediately")
+                raise RuntimeError(error_msg)
 
             logger.info("Llama server process started (PID: %d)", self._process.pid)
 
+        except subprocess.TimeoutExpired:
+            # Process is still running, which is good
+            logger.info("Llama server process started (PID: %d)", self._process.pid)
         except Exception:
             logger.exception("Failed to start Llama server")
-            self._process = None
+            if self._process:
+                try:
+                    stdout, stderr = self._process.communicate(timeout=1)
+                    if stderr:
+                        logger.error(
+                            "Stderr: %s", stderr.decode("utf-8", errors="ignore")
+                        )
+                except:
+                    pass
+                self._process = None
             raise
 
     def stop(self) -> None:

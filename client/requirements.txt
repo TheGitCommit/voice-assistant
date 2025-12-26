@@ -1,18 +1,37 @@
-# WebSocket Client (for local server mode)
+# Sovereign Voice Assistant Client - Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# =============================================================================
+# Core Dependencies
+# =============================================================================
 websockets>=12.0
-
-# HTTP Client (for cloud API mode)
 httpx>=0.25.0
+python-dotenv>=1.0.0
 
+# =============================================================================
 # Audio I/O
+# =============================================================================
 sounddevice>=0.4.6
 numpy>=1.24.0
 
+# =============================================================================
 # Voice Activity Detection
+# =============================================================================
 webrtcvad>=2.0.10
 
-# Environment variables
-python-dotenv>=1.0.0
+# =============================================================================
+# Wake Word Detection
+# =============================================================================
+openwakeword>=0.5.0
 
-# System dependencies (install via apt):
-# sudo apt-get install -y portaudio19-dev python3-dev
+# =============================================================================
+# System Dependencies
+# =============================================================================
+# Linux (apt):
+#   sudo apt-get install -y portaudio19-dev python3-dev
+#
+# macOS (brew):
+#   brew install portaudio
+#
+# Windows:
+#   Usually works without additional dependencies

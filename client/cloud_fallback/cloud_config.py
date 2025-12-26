@@ -4,7 +4,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-env_path = Path(__file__).parent.parent / ".env"
+# Load .env from project root (three levels up from cloud_fallback/)
+PROJECT_ROOT = Path(__file__).parent.parent.parent.absolute()
+env_path = PROJECT_ROOT / ".env"
 load_dotenv(env_path)
 
 
@@ -22,7 +24,7 @@ class DeepgramConfig:
 class DeepSeekConfig:
     api_key: str
     model: str = "deepseek-chat"
-    base_url: str = "https://api.deepseek.com"
+    base_url: str = "https://api.deepseek.com/v1"
     max_tokens: int = 1000
     temperature: float = 0.7
 

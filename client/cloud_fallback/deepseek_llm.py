@@ -40,7 +40,7 @@ class DeepSeekLLM:
                 logger.debug("Sending request to DeepSeek: prompt_len=%d", len(prompt))
 
                 response = await client.post(
-                    f"{self.config.base_url}/v1/chat/completions",
+                    f"{self.config.base_url}/chat/completions",
                     headers=headers,
                     json=payload,
                 )

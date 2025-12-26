@@ -17,7 +17,7 @@ class LlamaConfig:
     port: int = 8080
 
     gpu_layers: int = -1
-    context_size: int = 8192
+    context_size: int = 4096
 
     max_history_turns: int = 10
 
@@ -49,11 +49,33 @@ class PiperConfig:
 
 
 @dataclass(frozen=True)
+class KokoroConfig:
+    """Kokoro-82M TTS configuration.
+
+    Uses kokoro-onnx for fast local inference.
+    Models are auto-downloaded from HuggingFace on first use.
+    """
+
+    model_path: str = ""  # Empty = auto-download from HuggingFace
+    voices_path: str = ""  # Empty = auto-download from HuggingFace
+    voice: str = "af_heart"  # Default voice (American Female)
+    speed: float = 1.0
+    sample_rate: int = 24000  # Kokoro outputs 24kHz audio
+
+
+@dataclass(frozen=True)
+class TTSConfig:
+    """TTS provider selection. Kokoro is default; Piper is fallback."""
+
+    provider: str = "kokoro"  # Options: "kokoro" (default), "piper" (fallback)
+
+
+@dataclass(frozen=True)
 class WhisperConfig:
-    model_size: str = "small.en"
+    model_size: str = "distil-small.en"  # from distil-small.en, small.en
     device: str = "cuda"
     compute_type: str = "float16"
-    beam_size: int = 5
+    beam_size: int = 1  # from 5
 
 
 @dataclass(frozen=True)
@@ -90,6 +112,20 @@ class LoggingConfig:
     rate_limit_seconds: float = 5.0
 
 
+@dataclass(frozen=True)
+class AudioPlaybackConfig:
+    sample_rate: int = 24000  # Match Kokoro's output
+    channels: int = 1
+    dtype: str = "int16"
+
+
+@dataclass(frozen=True)
+class RAGConfig:
+    """RAG (Retrieval Augmented Generation) configuration."""
+
+    enabled: bool = True  # Enable/disable RAG capabilities
+
+
 CONFIG = {
     "llama": LlamaConfig(
         exe_path=os.getenv("LLAMA_EXE_PATH", r"path_to_server.exe"),
@@ -101,9 +137,21 @@ CONFIG = {
             "PIPER_MODEL_PATH", r".\server\piper\models\en_US-amy-medium.onnx"
         ),
     ),
+    "kokoro": KokoroConfig(
+        model_path=os.getenv("KOKORO_MODEL_PATH", ""),
+        voices_path=os.getenv("KOKORO_VOICES_PATH", ""),
+        voice=os.getenv("KOKORO_VOICE", "af_heart"),
+        speed=float(os.getenv("KOKORO_SPEED", "1.0")),
+    ),
+    "tts": TTSConfig(
+        provider=os.getenv("TTS_PROVIDER", "piper"),
+    ),
     "whisper": WhisperConfig(),
     "vad": VADConfig(),
     "audio": AudioConfig(),
     "websocket": WebSocketConfig(),
     "logging": LoggingConfig(),
+    "rag": RAGConfig(
+        enabled=os.getenv("ENABLE_RAG", "false").lower() in ("true", "1", "yes", "on"),
+    ),
 }
