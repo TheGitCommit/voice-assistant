@@ -89,7 +89,6 @@ class WebSocketConnection:
         self,
         on_text_message=None,
         on_interrupt=None,
-        on_load_session=None,
     ) -> None:
         try:
             logger.debug("[%s] Receive loop started", self.connection_id)
@@ -139,7 +138,7 @@ class WebSocketConnection:
                     try:
                         data = json.loads(text)
                         await self._handle_json_message(
-                            data, on_text_message, on_interrupt, on_load_session
+                            data, on_text_message, on_interrupt
                         )
                     except json.JSONDecodeError:
                         logger.warning(
@@ -170,7 +169,6 @@ class WebSocketConnection:
         data: dict[str, Any],
         on_text_message=None,
         on_interrupt=None,
-        on_load_session=None,
     ) -> None:
         msg_type = data.get("type")
 
@@ -181,26 +179,10 @@ class WebSocketConnection:
                 data.get("sample_rate"),
                 data.get("channels"),
             )
-            # Check if client wants to restore a session
-            session_id = data.get("session_id")
-            if session_id and on_load_session:
-                on_load_session(session_id)
 
         elif msg_type == "interrupt" and on_interrupt:
             logger.info("[%s] Interrupt received (barge-in)", self.connection_id)
             on_interrupt()
-
-        elif msg_type == "load_session" and on_load_session:
-            session_id = data.get("session_id")
-            if session_id:
-                success = on_load_session(session_id)
-                await self.send_event(
-                    {
-                        "type": "session_loaded",
-                        "session_id": session_id,
-                        "success": success,
-                    }
-                )
 
         elif msg_type == "test_question" and on_text_message:
             question_text = data.get("text", "")

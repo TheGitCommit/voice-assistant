@@ -37,11 +37,6 @@ class AudioFeedback:
             frequency=220, duration=0.3, volume=0.3
         )
 
-        # Wake word detected: short ascending chirp
-        tone1 = self._generate_tone(frequency=523, duration=0.05, volume=0.25)
-        tone2 = self._generate_tone(frequency=659, duration=0.05, volume=0.25)
-        self._cache["wake_word"] = tone1 + tone2
-
         logger.debug("Audio feedback tones generated")
 
     def _generate_tone(

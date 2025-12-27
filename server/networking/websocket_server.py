@@ -28,7 +28,6 @@ async def audio_stream_endpoint(websocket: WebSocket):
             connection.receive_loop(
                 on_text_message=processor.handle_text_message,
                 on_interrupt=processor.interrupt,
-                on_load_session=processor.load_session,
             ),
             name=f"recv-{connection.connection_id}",
         ),
@@ -80,14 +79,6 @@ async def audio_stream_endpoint(websocket: WebSocket):
                 "[%s] Performance summary: %s",
                 connection.connection_id,
                 perf_stats,
-            )
-
-        # Save conversation history for potential restoration
-        if processor.save_session():
-            logger.info(
-                "[%s] Session saved: %s",
-                connection.connection_id,
-                processor.session_id,
             )
 
         await processor.llm.close()

@@ -1,32 +1,32 @@
-# Sovereign Voice Assistant Client - Python Dependencies
+# Sovereign Voice Assistant - Python Dependencies
 # Install with: pip install -r requirements.txt
 
 # =============================================================================
 # Core Dependencies
 # =============================================================================
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
 websockets>=12.0
 httpx>=0.25.0
 python-dotenv>=1.0.0
+numpy>=1.24.0
 
 # =============================================================================
-# Audio I/O
+# Audio Processing
 # =============================================================================
 sounddevice>=0.4.6
-numpy>=1.24.0
+
+# =============================================================================
+# Speech-to-Text (Whisper)
+# =============================================================================
+faster-whisper>=0.10.0
+# Note: Requires CUDA toolkit for GPU acceleration
 
 # =============================================================================
 # Voice Activity Detection
 # =============================================================================
-webrtcvad>=2.0.10
+torch>=2.0.0
+torchaudio>=2.0.0
+silero-vad>=0.1.0
 
-# =============================================================================
-# System Dependencies
-# =============================================================================
-# Linux (apt):
-#   sudo apt-get install -y portaudio19-dev python3-dev
-#
-# macOS (brew):
-#   brew install portaudio
-#
-# Windows:
-#   Usually works without additional dependencies
+

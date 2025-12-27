@@ -119,13 +119,6 @@ class AudioPlaybackConfig:
     dtype: str = "int16"
 
 
-@dataclass(frozen=True)
-class RAGConfig:
-    """RAG (Retrieval Augmented Generation) configuration."""
-
-    enabled: bool = True  # Enable/disable RAG capabilities
-
-
 CONFIG = {
     "llama": LlamaConfig(
         exe_path=os.getenv("LLAMA_EXE_PATH", r"path_to_server.exe"),
@@ -151,7 +144,4 @@ CONFIG = {
     "audio": AudioConfig(),
     "websocket": WebSocketConfig(),
     "logging": LoggingConfig(),
-    "rag": RAGConfig(
-        enabled=os.getenv("ENABLE_RAG", "false").lower() in ("true", "1", "yes", "on"),
-    ),
 }

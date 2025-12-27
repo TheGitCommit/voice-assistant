@@ -10,7 +10,6 @@ from server.core.vad import VoiceActivityDetector
 from server.inference.whisper_stt import WhisperSTT
 from server.inference.tts_factory import create_tts
 from server.inference.llm_client import LLMClient
-from server.rag.rag_router import augment_with_rag
 from server.utils.logging_utils import RateLimitedLogger
 from server.utils.timing import TimingStats
 from server.utils.latency_monitor import get_latency_monitor, RequestTracker
@@ -53,14 +52,13 @@ class AudioProcessor:
     The voice assistant stops working entirely. This is the central coordinator.
     """
 
-    def __init__(self, connection: "WebSocketConnection", session_id: str = None):
+    def __init__(self, connection: "WebSocketConnection"):
         self.connection = connection
         self.vad = VoiceActivityDetector(CONFIG["vad"], CONFIG["audio"])
         self.stt = WhisperSTT(CONFIG["whisper"])
         self.tts = create_tts(CONFIG)  # Uses TTS_PROVIDER env var (piper/kokoro)
 
-        self._session_id = session_id or connection.connection_id
-        self.llm = LLMClient(CONFIG["llama"], session_id=self._session_id)
+        self.llm = LLMClient(CONFIG["llama"])
 
         self._rl_logger = RateLimitedLogger(
             logger, CONFIG["logging"].rate_limit_seconds
@@ -247,27 +245,9 @@ class AudioProcessor:
                 {"type": "transcription", "text": transcript}
             )
 
-            # RAG: Check if we need to augment with knowledge base context
-            if CONFIG["rag"].enabled:
-                rag_context, was_augmented = await augment_with_rag(
-                    transcript, force=False
-                )
-                if was_augmented:
-                    logger.info(
-                        "[%s] RAG activated: retrieved context (length=%d)",
-                        conn_id,
-                        len(rag_context),
-                    )
-                    # Prepend context to the query
-                    augmented_query = f"{rag_context}\n\nUser: {transcript}"
-                else:
-                    augmented_query = transcript
-            else:
-                augmented_query = transcript
-
             # LLM + TTS pipeline
             self._current_pipeline_task = asyncio.create_task(
-                self._streaming_llm_tts_pipeline(augmented_query, conn_id, tracker)
+                self._streaming_llm_tts_pipeline(transcript, conn_id, tracker)
             )
             await self._current_pipeline_task
 
@@ -284,20 +264,6 @@ class AudioProcessor:
             if self._bargein_buffer:
                 queued = self._bargein_buffer.pop(0)
                 asyncio.create_task(self._process_utterance(queued))
-
-    def load_session(self, session_id: str) -> bool:
-        """Load a previous conversation session."""
-        self._session_id = session_id
-        return self.llm.load_history(session_id)
-
-    def save_session(self) -> bool:
-        """Save the current conversation session."""
-        return self.llm.save_history()
-
-    @property
-    def session_id(self) -> str:
-        """Get the current session ID."""
-        return self._session_id
 
     async def handle_text_message(self, text: str) -> None:
         """Handle a text message from the client (typed input)."""
@@ -321,25 +287,9 @@ class AudioProcessor:
             logger.info("[%s] User (text): %s", conn_id, text)
             await self.connection.send_event({"type": "transcription", "text": text})
 
-            # RAG: Check if we need to augment with knowledge base context
-            if CONFIG["rag"].enabled:
-                rag_context, was_augmented = await augment_with_rag(text, force=False)
-                if was_augmented:
-                    logger.info(
-                        "[%s] RAG activated: retrieved context (length=%d)",
-                        conn_id,
-                        len(rag_context),
-                    )
-                    # Prepend context to the query
-                    augmented_query = f"{rag_context}\n\nUser: {text}"
-                else:
-                    augmented_query = text
-            else:
-                augmented_query = text
-
             # LLM + TTS pipeline
             self._current_pipeline_task = asyncio.create_task(
-                self._streaming_llm_tts_pipeline(augmented_query, conn_id, tracker)
+                self._streaming_llm_tts_pipeline(text, conn_id, tracker)
             )
             await self._current_pipeline_task
 
