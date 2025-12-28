@@ -14,8 +14,9 @@ import os
 from typing import Optional
 import numpy as np
 
-# --- PATCH START ---
-# Fix for 'EspeakWrapper' has no attribute 'set_data_path' on Windows
+from server.config import KokoroConfig
+from server.inference.tts_base import BaseTTS
+
 try:
     from phonemizer.backend.espeak.wrapper import EspeakWrapper
 
@@ -27,17 +28,8 @@ try:
         EspeakWrapper.set_data_path = _dummy_set_data_path
 except ImportError:
     pass
-# --- PATCH END ---
-
-from server.config import KokoroConfig
-from server.inference.tts_base import BaseTTS
 
 logger = logging.getLogger(__name__)
-# ... rest of the file ...
-
-# Lazy-loaded pipeline
-_pipeline = None
-_pipeline_lock = asyncio.Lock()
 
 
 class KokoroTTS(BaseTTS):
@@ -57,9 +49,10 @@ class KokoroTTS(BaseTTS):
     See: https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md
     """
 
+    _shared_pipeline = None
+
     def __init__(self, config: KokoroConfig):
         self.config = config
-        self._initialized = False
 
         logger.info(
             "KokoroTTS configured: voice=%s speed=%.1f",
@@ -67,48 +60,46 @@ class KokoroTTS(BaseTTS):
             config.speed,
         )
 
-    async def _ensure_initialized(self) -> bool:
-        """Lazy initialization of the pipeline."""
-        global _pipeline
+    @classmethod
+    async def initialize(cls, config: KokoroConfig) -> None:
+        """Initialize the shared Kokoro pipeline at startup.
 
-        # Check global pipeline first (shared across all instances)
-        if _pipeline is not None:
-            self._initialized = True
-            return True
+        This should be called once at server startup before accepting connections.
+        The pipeline is shared across all KokoroTTS instances.
 
-        async with _pipeline_lock:
-            if self._initialized and _pipeline is not None:
-                return True
+        Args:
+            config: KokoroConfig with model settings
+        """
+        if cls._shared_pipeline is not None:
+            logger.info("Kokoro pipeline already initialized")
+            return
 
+        try:
+            logger.info("Initializing Kokoro TTS pipeline...")
+            start = time.perf_counter()
+
+            # Import kokoro
             try:
-                logger.info("Initializing Kokoro TTS pipeline...")
-                start = time.perf_counter()
+                from kokoro import KPipeline
+            except ImportError as e:
+                raise ImportError(
+                    "kokoro not installed. Install with: pip install kokoro>=0.9.4\n"
+                    "Also install espeak-ng: https://github.com/espeak-ng/espeak-ng/releases"
+                ) from e
 
-                # Import kokoro
-                try:
-                    from kokoro import KPipeline
-                except ImportError as e:
-                    raise ImportError(
-                        "kokoro not installed. Install with: pip install kokoro>=0.9.4\n"
-                        "Also install espeak-ng: https://github.com/espeak-ng/espeak-ng/releases"
-                    ) from e
+            # Initialize pipeline in thread pool
+            # lang_code: 'a' = American English, 'b' = British English
+            loop = asyncio.get_event_loop()
+            cls._shared_pipeline = await loop.run_in_executor(
+                None, lambda: KPipeline(lang_code="a")
+            )
 
-                # Initialize pipeline in thread pool
-                loop = asyncio.get_event_loop()
+            duration = time.perf_counter() - start
+            logger.info("Kokoro pipeline initialized in %.2fs", duration)
 
-                # lang_code: 'a' = American English, 'b' = British English
-                _pipeline = await loop.run_in_executor(
-                    None, lambda: KPipeline(lang_code="a")
-                )
-
-                duration = time.perf_counter() - start
-                logger.info("Kokoro pipeline initialized in %.2fs", duration)
-                self._initialized = True
-                return True
-
-            except Exception as e:
-                logger.exception("Failed to initialize Kokoro: %s", e)
-                return False
+        except Exception as e:
+            logger.exception("Failed to initialize Kokoro: %s", e)
+            raise
 
     @property
     def name(self) -> str:
@@ -123,8 +114,10 @@ class KokoroTTS(BaseTTS):
         if not text or not text.strip():
             return None
 
-        if not await self._ensure_initialized():
-            logger.error("Kokoro not initialized, cannot synthesize")
+        if KokoroTTS._shared_pipeline is None:
+            logger.error(
+                "Kokoro pipeline not initialized. Call KokoroTTS.initialize() at startup."
+            )
             return None
 
         start_time = time.perf_counter()
@@ -136,7 +129,7 @@ class KokoroTTS(BaseTTS):
             # The pipeline returns a generator of (graphemes, phonemes, audio) tuples
             def _synthesize():
                 all_audio = []
-                generator = _pipeline(
+                generator = KokoroTTS._shared_pipeline(
                     text,
                     voice=self.config.voice,
                     speed=self.config.speed,

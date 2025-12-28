@@ -49,6 +49,15 @@ async def lifespan(app: FastAPI):
 
         logger.info("Llama server ready")
 
+        # 3. Initialize TTS provider if Kokoro
+        tts_provider = CONFIG["tts"].provider.lower()
+        if tts_provider == "kokoro":
+            from server.inference.kokoro_tts import KokoroTTS
+
+            logger.info("Initializing Kokoro TTS...")
+            await KokoroTTS.initialize(CONFIG["kokoro"])
+            logger.info("Kokoro TTS ready")
+
         # Start health monitor in background
         monitor_task = asyncio.create_task(
             llama_manager.monitor_loop(check_interval=30.0)

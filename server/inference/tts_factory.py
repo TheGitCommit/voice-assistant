@@ -57,7 +57,3 @@ def create_tts(config: dict = None) -> BaseTTS:
     else:
         available = ["piper", "kokoro"]
         raise ValueError(f"Unknown TTS provider: '{provider}'. Available: {available}")
-
-
-# Note: get_available_providers() was removed - it was defined but never called.
-# See REFACTOR_LOG.md for details.

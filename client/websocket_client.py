@@ -1,12 +1,13 @@
 """
 WebSocket client that streams audio to server and plays responses.
 
-This is the simple always-on version that streams audio continuously.
+This version uses wake word detection to gate audio streaming.
 """
 
 import asyncio
 import json
 import logging
+from enum import Enum
 
 import websockets
 
@@ -15,10 +16,19 @@ from client.audio.audio_capture import AudioCapture
 from client.audio.audio_playback import AudioPlayback
 from client.audio.vad import VoiceActivityDetector
 from client.audio.feedback import AudioFeedback
+from client.audio.wake_word import WakeWordDetector
 
 logger = logging.getLogger(__name__)
 
 # Note: Barge-in is now handled server-side via keyword detection in transcription
+
+
+class ClientState(Enum):
+    """Client state machine states."""
+
+    WAITING_FOR_WAKE = "waiting_for_wake"
+    WAKE_DETECTED = "wake_detected"
+    STREAMING = "streaming"
 
 
 class VoiceAssistantClient:
@@ -30,15 +40,17 @@ class VoiceAssistantClient:
         self.capture = AudioCapture(config.capture)
         self.playback = AudioPlayback(config.playback)
         self.vad = VoiceActivityDetector(config.vad, config.capture.sample_rate)
+        self.wake_word = WakeWordDetector(config.wake_word, config.capture.sample_rate)
         self.feedback = AudioFeedback(config.playback.sample_rate)
 
         self._websocket = None
         self._running = False
+        self._state = ClientState.WAITING_FOR_WAKE
         self._tts_active = False
         self._interrupt_sent = False
         self._feedback_enabled = True
 
-        logger.info("VoiceAssistantClient initialized (always-on mode)")
+        logger.info("VoiceAssistantClient initialized (wake-word gated mode)")
 
     async def run(self) -> None:
         logger.info("Connecting to server: %s", self.config.server.url)
@@ -57,7 +69,8 @@ class VoiceAssistantClient:
 
                 self.capture.start()
                 self.playback.start()
-                await self._send_hello()
+                # Don't send hello immediately - wait for wake word first
+                # Hello will be sent when streaming starts
 
                 send_task = asyncio.create_task(self._send_loop())
                 recv_task = asyncio.create_task(self._receive_loop())
@@ -97,23 +110,62 @@ class VoiceAssistantClient:
         logger.info("Sent hello message")
 
     async def _send_loop(self) -> None:
-        logger.info("Send loop started (always-on mode - microphone active)")
+        logger.info("Send loop started (wake-word gated mode)")
 
         # Wait for pre-roll buffer to fill (gives hardware time to stabilize)
         await self.capture.wait_for_preroll()
         logger.info("Pre-roll complete, audio capture ready")
+        logger.info("Waiting for wake word: %s", self.config.wake_word.model_name)
 
         try:
+            chunk_count = 0
             while self._running and self._websocket:
                 chunk = self.capture.read(timeout=1.0)
+                chunk_count += 1
 
-                # Always-on mode - stream everything
-                # Update VAD with current TTS state for echo suppression
-                self.vad.set_tts_active(self._tts_active)
+                if self._state == ClientState.WAITING_FOR_WAKE:
+                    # Log periodically that we're receiving audio while waiting
+                    if chunk_count == 1:
+                        logger.info(
+                            "First audio chunk received while waiting for wake word: "
+                            "shape=%s dtype=%s samples=%d",
+                            chunk.shape,
+                            chunk.dtype,
+                            len(chunk),
+                        )
+                    elif (
+                        chunk_count % 100 == 0
+                    ):  # Log every ~2 seconds (100 chunks * 20ms)
+                        logger.debug(
+                            "Still waiting for wake word: received %d chunks, "
+                            "chunk_shape=%s chunk_samples=%d",
+                            chunk_count,
+                            chunk.shape,
+                            len(chunk),
+                        )
 
-                # Process frame for VAD (updates internal state, used for echo suppression)
-                _ = self.vad.process_frame(chunk)
-                await self._websocket.send(chunk.tobytes())
+                    # Listen for wake word
+                    if self.wake_word.process_frame(chunk):
+                        logger.info("Wake word detected! Starting audio stream...")
+                        self._state = ClientState.WAKE_DETECTED
+                        # Play feedback tone
+                        self._play_feedback("listening")
+                        # Brief activation delay before starting stream
+                        await asyncio.sleep(
+                            self.config.wake_word.activation_delay_ms / 1000.0
+                        )
+                        self._state = ClientState.STREAMING
+                        # Send hello message when starting to stream
+                        await self._send_hello()
+
+                elif self._state == ClientState.STREAMING:
+                    # Stream audio to server
+                    # Update VAD with current TTS state for echo suppression
+                    self.vad.set_tts_active(self._tts_active)
+
+                    # Process frame for VAD (updates internal state, used for echo suppression)
+                    _ = self.vad.process_frame(chunk)
+                    await self._websocket.send(chunk.tobytes())
 
                 await asyncio.sleep(0.001)
 
@@ -205,6 +257,10 @@ class VoiceAssistantClient:
                 self._tts_active = False
                 self._interrupt_sent = False
                 logger.debug("TTS stopped")
+                # Return to wake word listening after response complete
+                self._state = ClientState.WAITING_FOR_WAKE
+                self.wake_word.reset()
+                logger.info("Returning to wake word listening")
 
             elif msg_type == "playback_stop":
                 # Server detected a barge-in keyword in user speech
@@ -243,6 +299,11 @@ class VoiceAssistantClient:
             self.playback.close()
         except Exception:
             logger.exception("Error closing audio playback")
+
+        try:
+            self.wake_word.close()
+        except Exception:
+            logger.exception("Error closing wake word detector")
 
         if self._websocket:
             try:
