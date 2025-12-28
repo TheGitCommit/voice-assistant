@@ -38,11 +38,19 @@ class VADConfig:
 
 
 @dataclass(frozen=True)
+class WakeWordConfig:
+    model_name: str = "alexa"  # Pre-trained wake word model name
+    threshold: float = 0.5  # Detection confidence threshold (0.0 to 1.0)
+    activation_delay_ms: int = 500  # Grace period after wake word detection
+
+
+@dataclass(frozen=True)
 class ClientConfig:
     server: ServerConfig
     capture: AudioCaptureConfig
     playback: AudioPlaybackConfig
     vad: VADConfig
+    wake_word: WakeWordConfig
 
 
 DEFAULT_CONFIG = ClientConfig(
@@ -52,4 +60,5 @@ DEFAULT_CONFIG = ClientConfig(
     capture=AudioCaptureConfig(),
     playback=AudioPlaybackConfig(),
     vad=VADConfig(),
+    wake_word=WakeWordConfig(),
 )
