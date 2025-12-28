@@ -30,3 +30,6 @@ torchaudio>=2.0.0
 silero-vad>=0.1.0
 
 
+
+webrtcvad~=2.0.10
+phonemizer~=3.3.0
