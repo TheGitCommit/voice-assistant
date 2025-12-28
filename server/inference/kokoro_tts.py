@@ -1,6 +1,6 @@
 """Kokoro-82M TTS implementation using the official kokoro library.
 
-Requires: 
+Requires:
     pip install kokoro>=0.9.4 soundfile
     Windows: Install espeak-ng from https://github.com/espeak-ng/espeak-ng/releases
 

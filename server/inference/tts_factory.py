@@ -3,10 +3,10 @@
 Usage:
     from server.inference.tts_factory import create_tts
     from server.config import CONFIG
-    
+
     tts = create_tts(CONFIG)  # Returns appropriate TTS based on config
     audio = await tts.synthesize("Hello world")
-    
+
 To switch providers, set TTS_PROVIDER environment variable:
     TTS_PROVIDER=piper   # Use Piper TTS (default)
     TTS_PROVIDER=kokoro  # Use Kokoro-82M TTS
